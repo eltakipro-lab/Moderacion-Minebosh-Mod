@@ -34,11 +34,14 @@ public class ModeracionScreen extends Screen {
     private static final int ESPACIO = 4;
     private static final int PADDING_PANEL = 12;
     private static final int MARGEN_PANTALLA = 20;
-    private static final int GAP_PANELES = 20;
-    private static final int ANCHO_MIN_REGISTRO = 220;
-    private static final int ANCHO_MAX_REGISTRO = 420;
     private static final int FILAS_MIN = 4;
     private static final int FILAS_MAX = 25;
+
+    // ---------- Mini chat de registro (cajita en la esquina) ----------
+    private static final int REGISTRO_MARGEN = 14;
+    private static final int REGISTRO_ANCHO = 260;
+    private static final int REGISTRO_ALTO = 160;
+    private static final int REGISTRO_TITULO_ALTO = 16;
 
     // ---------- Colores ----------
     private static final int COLOR_TITULO = 0x55FFFF;
@@ -67,7 +70,7 @@ public class ModeracionScreen extends Screen {
     private record MensajeSS(String etiqueta, String texto) {}
 
     private static final MensajeSS[] MENSAJES_SS = new MensajeSS[] {
-            new MensajeSS("¿Admite hacks? (60s)", "¡Buenas! ¿Admites el uso de hacks o prefieres revisión? Si admites tu baneo será mucho menor. Tiene 60s"),
+            new MensajeSS("¿Admites uso de Hacks o prefiere SS? (60s) Si admite su baneo sera mucho menor.", "¿Admites uso de Hacks o prefiere SS? (60s) Si admite su baneo sera mucho menor."),
             new MensajeSS("30s", "30s"),
             new MensajeSS("10s", "10s"),
             new MensajeSS("9s", "9s"),
@@ -80,7 +83,7 @@ public class ModeracionScreen extends Screen {
             new MensajeSS("2s", "2s"),
             new MensajeSS("1s", "1s"),
             new MensajeSS("0s", "0s"),
-            new MensajeSS("AnyDesk (5 min)", "Tienes 5 minutos para pasarme tu codigo de AnyDesk.com"),
+            new MensajeSS("Tienes 5 minutos para pasarme tu codigo de AnyDesk.com", "Tienes 5 minutos para pasarme tu codigo de AnyDesk.com"),
             new MensajeSS("Tiempo terminado", "Tu tiempo se termino."),
     };
 
@@ -180,6 +183,8 @@ public class ModeracionScreen extends Screen {
     private boolean mostrarRegistro;
     private int registroX;
     private int registroAncho;
+    private int registroCajaTopY;
+    private int registroCajaBottomY;
     private int registroContenidoY0;
     private int registroContenidoY1;
     private int registroScroll = 0;
@@ -200,23 +205,19 @@ public class ModeracionScreen extends Screen {
     protected void init() {
         this.panelAncho = ANCHO_ETIQUETA + (ANCHO_BOTON * 3) + (ESPACIO * 4);
 
-        // La pantalla ahora aprovecha toda la ventana: panel de acciones a la
-        // izquierda y panel de registro (chat + historial) a la derecha.
-        int anchoDisponible = this.width - MARGEN_PANTALLA * 2;
-        int anchoRegistro = anchoDisponible - panelAncho - GAP_PANELES;
-        this.mostrarRegistro = anchoRegistro >= ANCHO_MIN_REGISTRO;
-        if (this.mostrarRegistro) {
-            anchoRegistro = Math.min(anchoRegistro, ANCHO_MAX_REGISTRO);
-        }
-
-        int anchoGrupo = this.mostrarRegistro ? (panelAncho + GAP_PANELES + anchoRegistro) : panelAncho;
-        int grupoX = (this.width - anchoGrupo) / 2;
-        this.panelX = grupoX;
-        this.registroX = grupoX + panelAncho + GAP_PANELES;
-        this.registroAncho = anchoRegistro;
-
+        // El panel principal ocupa toda la ventana (a lo alto sobre todo), centrado.
+        this.panelX = (this.width - panelAncho) / 2;
         this.panelTopY = MARGEN_PANTALLA;
         this.panelBottomY = this.height - MARGEN_PANTALLA;
+
+        // El mini chat de registro es una cajita fija anclada en la esquina
+        // inferior derecha de la pantalla, por encima de todo lo demás.
+        this.mostrarRegistro = this.width >= REGISTRO_ANCHO + REGISTRO_MARGEN * 2 + 40
+                && this.height >= REGISTRO_ALTO + REGISTRO_MARGEN * 2;
+        this.registroAncho = REGISTRO_ANCHO;
+        this.registroX = this.width - REGISTRO_MARGEN - REGISTRO_ANCHO;
+        this.registroCajaBottomY = this.height - REGISTRO_MARGEN;
+        this.registroCajaTopY = this.registroCajaBottomY - REGISTRO_ALTO;
 
         this.tabsY = panelTopY + PADDING_PANEL;
         this.tituloY = tabsY - 20;
@@ -351,22 +352,21 @@ public class ModeracionScreen extends Screen {
 
         this.mensajeY = utilidadesY + ALTO + 14;
 
-        // ---------- Panel de registro (mini chat: logs del servidor + historial) ----------
+        // ---------- Mini chat de registro: cajita en la esquina inferior derecha ----------
         if (this.mostrarRegistro) {
-            int registroTituloY = panelTopY + PADDING_PANEL - 8;
-            int anchoLimpiar = 60;
+            int anchoLimpiar = 50;
             this.limpiarRegistroBtn = ButtonWidget.builder(Text.of("Limpiar"), b -> {
                         RegistroModeracion.limpiar();
                         registroCacheTamano = -1; // fuerza reconstrucción del caché
                         registroScroll = 0;
                         registroAutoScroll = true;
                     })
-                    .dimensions(registroX + registroAncho - anchoLimpiar, registroTituloY - 2, anchoLimpiar, 16)
+                    .dimensions(registroX + registroAncho - anchoLimpiar - 4, registroCajaTopY + 2, anchoLimpiar, 12)
                     .build();
             this.addDrawableChild(limpiarRegistroBtn);
 
-            this.registroContenidoY0 = registroTituloY + 16;
-            this.registroContenidoY1 = panelBottomY - PADDING_PANEL;
+            this.registroContenidoY0 = registroCajaTopY + REGISTRO_TITULO_ALTO;
+            this.registroContenidoY1 = registroCajaBottomY - 6;
             registroCacheTamano = -1; // recalcular al (re)abrir la pantalla
         }
 
@@ -622,7 +622,7 @@ public class ModeracionScreen extends Screen {
 
     private void actualizarCacheRegistro() {
         List<RegistroModeracion.Entrada> entradas = RegistroModeracion.copia();
-        int anchoContenido = registroAncho - PADDING_PANEL * 2;
+        int anchoContenido = registroAncho - 4;
         if (entradas.size() == registroCacheTamano && anchoContenido == registroCacheAncho) {
             return;
         }
@@ -695,11 +695,12 @@ public class ModeracionScreen extends Screen {
         // Separador antes de la fila de utilidades
         context.fill(panelX, utilidadesLabelY - 2, panelX + panelAncho, utilidadesLabelY - 1, COLOR_SEPARADOR);
 
-        // Panel lateral de registro (mini chat con logs del servidor + historial local)
+        // Mini chat de registro: cajita en la esquina, por encima de todo lo demás
         if (mostrarRegistro) {
-            context.fill(registroX - PADDING_PANEL, panelTopY, registroX + registroAncho + PADDING_PANEL, panelBottomY, COLOR_FONDO_PANEL);
-            context.fill(registroX - PADDING_PANEL, panelTopY, registroX + registroAncho + PADDING_PANEL, panelTopY + 1, COLOR_BORDE_PANEL);
-            context.fill(registroX - PADDING_PANEL, panelBottomY - 1, registroX + registroAncho + PADDING_PANEL, panelBottomY, COLOR_BORDE_PANEL);
+            context.fill(registroX - 8, registroCajaTopY, registroX + registroAncho + 8, registroCajaBottomY, COLOR_FONDO_PANEL);
+            context.fill(registroX - 8, registroCajaTopY, registroX + registroAncho + 8, registroCajaTopY + 1, COLOR_BORDE_PANEL);
+            context.fill(registroX - 8, registroCajaBottomY - 1, registroX + registroAncho + 8, registroCajaBottomY, COLOR_BORDE_PANEL);
+            context.fill(registroX - 8, registroCajaTopY, registroX + registroAncho + 8, registroCajaTopY + REGISTRO_TITULO_ALTO - 2, 0x22FFFFFF);
         }
 
         super.render(context, mouseX, mouseY, delta);
@@ -748,8 +749,8 @@ public class ModeracionScreen extends Screen {
     }
 
     private void renderizarRegistro(DrawContext context) {
-        int tituloY = panelTopY + PADDING_PANEL - 8;
-        context.drawTextWithShadow(this.textRenderer, Text.of("Registro (chat + historial)"), registroX, tituloY, COLOR_ACENTO);
+        int tituloY = registroCajaTopY + 4;
+        context.drawTextWithShadow(this.textRenderer, Text.of("Registro"), registroX, tituloY, COLOR_ACENTO);
 
         actualizarCacheRegistro();
 
@@ -758,7 +759,7 @@ public class ModeracionScreen extends Screen {
             return;
         }
 
-        context.enableScissor(registroX - PADDING_PANEL, registroContenidoY0, registroX + registroAncho + PADDING_PANEL, registroContenidoY1);
+        context.enableScissor(registroX - 8, registroContenidoY0, registroX + registroAncho + 8, registroContenidoY1);
 
         int alturaTotal = registroLineasCache.size() * 10;
         int alturaVisible = registroContenidoY1 - registroContenidoY0;
