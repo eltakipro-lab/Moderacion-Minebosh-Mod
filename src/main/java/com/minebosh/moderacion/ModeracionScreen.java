@@ -1,14 +1,29 @@
 package com.minebosh.moderacion;
 
+import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;
+import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.client.gui.widget.TextFieldWidget;
+import net.minecraft.text.OrderedText;
 import net.minecraft.text.Text;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Properties;
 
 public class ModeracionScreen extends Screen {
 
@@ -17,8 +32,13 @@ public class ModeracionScreen extends Screen {
     private static final int ANCHO_BOTON = 64;
     private static final int ALTO = 20;
     private static final int ESPACIO = 4;
-    private static final int FILAS_POR_PAGINA = 6;
     private static final int PADDING_PANEL = 12;
+    private static final int MARGEN_PANTALLA = 20;
+    private static final int GAP_PANELES = 20;
+    private static final int ANCHO_MIN_REGISTRO = 220;
+    private static final int ANCHO_MAX_REGISTRO = 420;
+    private static final int FILAS_MIN = 4;
+    private static final int FILAS_MAX = 25;
 
     // ---------- Colores ----------
     private static final int COLOR_TITULO = 0x55FFFF;
@@ -30,12 +50,99 @@ public class ModeracionScreen extends Screen {
     private static final int COLOR_BORDE_PANEL = 0xFF3AA0FF;
     private static final int COLOR_FILA_PAR = 0x14FFFFFF;
     private static final int COLOR_SEPARADOR = 0x40FFFFFF;
+    private static final int COLOR_REGISTRO_ACCION = 0xFF7CFF9E;
+    private static final int COLOR_REGISTRO_CHAT = 0xFFA0C8FF;
+    private static final int COLOR_REGISTRO_HORA = 0xFF808080;
 
-    private enum Pestana { MUTES, BANEOS }
+    // ---------- Guardado en disco ----------
+    private static final Path ARCHIVO_ESTADO = FabricLoader.getInstance().getConfigDir()
+            .resolve("moderacion-minebosh-tabs.properties");
+    private static final Path ARCHIVO_HISTORIAL = FabricLoader.getInstance().getConfigDir()
+            .resolve("moderacion-minebosh-tabs-historial.log");
+    private static final DateTimeFormatter FORMATO_FECHA = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+
+    private enum Pestana { MUTES, BANEOS, SS }
+
+    // ---------- Mensajes predefinidos de la pestaña SS ----------
+    private record MensajeSS(String etiqueta, String texto) {}
+
+    private static final MensajeSS[] MENSAJES_SS = new MensajeSS[] {
+            new MensajeSS("¿Admite hacks? (60s)", "¡Buenas! ¿Admites el uso de hacks o prefieres revisión? Si admites tu baneo será mucho menor. Tiene 60s"),
+            new MensajeSS("30s", "30s"),
+            new MensajeSS("10s", "10s"),
+            new MensajeSS("9s", "9s"),
+            new MensajeSS("8s", "8s"),
+            new MensajeSS("7s", "7s"),
+            new MensajeSS("6s", "6s"),
+            new MensajeSS("5s", "5s"),
+            new MensajeSS("4s", "4s"),
+            new MensajeSS("3s", "3s"),
+            new MensajeSS("2s", "2s"),
+            new MensajeSS("1s", "1s"),
+            new MensajeSS("0s", "0s"),
+            new MensajeSS("AnyDesk (5 min)", "Tienes 5 minutos para pasarme tu codigo de AnyDesk.com"),
+            new MensajeSS("Tiempo terminado", "Tu tiempo se termino."),
+    };
+
+    // ---------------------------------------------------------------
+    // Registro en vivo (chat del servidor + acciones del panel).
+    // Estático porque debe sobrevivir a que el usuario cierre y abra
+    // la pantalla varias veces, y el listener de chat solo puede
+    // registrarse una vez con el sistema de eventos de Fabric.
+    // ---------------------------------------------------------------
+    private static final class RegistroModeracion {
+        private enum Tipo { CHAT, ACCION }
+        private record Entrada(String hora, Tipo tipo, String texto) {}
+
+        private static final int MAX_ENTRADAS = 400;
+        private static final DateTimeFormatter FORMATO_HORA = DateTimeFormatter.ofPattern("HH:mm:ss");
+        private static final List<Entrada> ENTRADAS = Collections.synchronizedList(new ArrayList<>());
+        private static boolean registrado = false;
+
+        static void asegurarRegistro() {
+            if (registrado) return;
+            registrado = true;
+            // Requiere el módulo fabric-message-api-v1 de Fabric API como dependencia del mod.
+            ClientReceiveMessageEvents.GAME.register((message, overlay) -> {
+                if (overlay) return;
+                String texto = message.getString();
+                if (texto == null || texto.isBlank()) return;
+                agregar(Tipo.CHAT, texto);
+            });
+        }
+
+        static void registrarAccion(String texto) {
+            agregar(Tipo.ACCION, texto);
+        }
+
+        private static void agregar(Tipo tipo, String texto) {
+            Entrada entrada = new Entrada(LocalTime.now().format(FORMATO_HORA), tipo, texto);
+            synchronized (ENTRADAS) {
+                ENTRADAS.add(entrada);
+                while (ENTRADAS.size() > MAX_ENTRADAS) {
+                    ENTRADAS.remove(0);
+                }
+            }
+        }
+
+        static List<Entrada> copia() {
+            synchronized (ENTRADAS) {
+                return new ArrayList<>(ENTRADAS);
+            }
+        }
+
+        static void limpiar() {
+            synchronized (ENTRADAS) {
+                ENTRADAS.clear();
+            }
+        }
+    }
 
     private Pestana pestanaActual = Pestana.MUTES;
     private int paginaMutes = 0;
     private int paginaBaneos = 0;
+    private int paginaSS = 0;
+    private int filasPorPagina = 6;
 
     private TextFieldWidget campoUsuario;
     private String ultimoUsuario = "";
@@ -46,9 +153,12 @@ public class ModeracionScreen extends Screen {
 
     private ButtonWidget tabMutesBtn;
     private ButtonWidget tabBaneosBtn;
+    private ButtonWidget tabSSBtn;
     private ButtonWidget anteriorBtn;
     private ButtonWidget siguienteBtn;
     private ButtonWidget logsBtn;
+    private ButtonWidget copiarBtn;
+    private ButtonWidget limpiarRegistroBtn;
 
     private final List<ButtonWidget> filasBotones = new ArrayList<>();
 
@@ -66,27 +176,65 @@ public class ModeracionScreen extends Screen {
     private int panelTopY;
     private int panelBottomY;
 
+    // ---------- Panel de registro (mini chat con logs + historial) ----------
+    private boolean mostrarRegistro;
+    private int registroX;
+    private int registroAncho;
+    private int registroContenidoY0;
+    private int registroContenidoY1;
+    private int registroScroll = 0;
+    private boolean registroAutoScroll = true;
+
+    private final List<OrderedText> registroLineasCache = new ArrayList<>();
+    private final List<Integer> registroColoresCache = new ArrayList<>();
+    private int registroCacheTamano = -1;
+    private int registroCacheAncho = -1;
+
     public ModeracionScreen() {
         super(Text.of("Moderación Minebosh"));
+        cargarEstado();
+        RegistroModeracion.asegurarRegistro();
     }
 
     @Override
     protected void init() {
         this.panelAncho = ANCHO_ETIQUETA + (ANCHO_BOTON * 3) + (ESPACIO * 4);
-        this.panelX = (this.width - panelAncho) / 2;
 
-        this.tituloY = 14;
-        this.tabsY = tituloY + 20;
+        // La pantalla ahora aprovecha toda la ventana: panel de acciones a la
+        // izquierda y panel de registro (chat + historial) a la derecha.
+        int anchoDisponible = this.width - MARGEN_PANTALLA * 2;
+        int anchoRegistro = anchoDisponible - panelAncho - GAP_PANELES;
+        this.mostrarRegistro = anchoRegistro >= ANCHO_MIN_REGISTRO;
+        if (this.mostrarRegistro) {
+            anchoRegistro = Math.min(anchoRegistro, ANCHO_MAX_REGISTRO);
+        }
 
-        int mitadTab = panelAncho / 2 - 2;
+        int anchoGrupo = this.mostrarRegistro ? (panelAncho + GAP_PANELES + anchoRegistro) : panelAncho;
+        int grupoX = (this.width - anchoGrupo) / 2;
+        this.panelX = grupoX;
+        this.registroX = grupoX + panelAncho + GAP_PANELES;
+        this.registroAncho = anchoRegistro;
+
+        this.panelTopY = MARGEN_PANTALLA;
+        this.panelBottomY = this.height - MARGEN_PANTALLA;
+
+        this.tabsY = panelTopY + PADDING_PANEL;
+        this.tituloY = tabsY - 20;
+
+        int tercioTab = (panelAncho - ESPACIO * 2) / 3;
+        int ultimoTabAncho = panelAncho - tercioTab * 2 - ESPACIO * 2;
         this.tabMutesBtn = ButtonWidget.builder(Text.of("Mutes"), b -> cambiarPestana(Pestana.MUTES))
-                .dimensions(panelX, tabsY, mitadTab, ALTO)
+                .dimensions(panelX, tabsY, tercioTab, ALTO)
                 .build();
         this.tabBaneosBtn = ButtonWidget.builder(Text.of("Baneos"), b -> cambiarPestana(Pestana.BANEOS))
-                .dimensions(panelX + mitadTab + 4, tabsY, mitadTab, ALTO)
+                .dimensions(panelX + tercioTab + ESPACIO, tabsY, tercioTab, ALTO)
+                .build();
+        this.tabSSBtn = ButtonWidget.builder(Text.of("SS"), b -> cambiarPestana(Pestana.SS))
+                .dimensions(panelX + (tercioTab + ESPACIO) * 2, tabsY, ultimoTabAncho, ALTO)
                 .build();
         this.addDrawableChild(tabMutesBtn);
         this.addDrawableChild(tabBaneosBtn);
+        this.addDrawableChild(tabSSBtn);
 
         this.usuarioY = tabsY + ALTO + ESPACIO * 2;
         int anchoBotonUsuario = 54;
@@ -101,6 +249,12 @@ public class ModeracionScreen extends Screen {
         this.campoUsuario.setMaxLength(32);
         this.campoUsuario.setSuggestion("Nombre del usuario"); // en 1.20.1 no existe setPlaceholder
         this.campoUsuario.setText(ultimoUsuario);
+        // Guarda lo escrito al instante, letra a letra, hasta que el usuario lo
+        // vuelva a cambiar (no hace falta pulsar ningún botón para que persista).
+        this.campoUsuario.setChangedListener(texto -> {
+            this.ultimoUsuario = texto;
+            guardarEstado();
+        });
         this.addDrawableChild(campoUsuario);
 
         int xBotonesUsuario = panelX + panelAncho - anchoBotonesUsuario;
@@ -110,10 +264,10 @@ public class ModeracionScreen extends Screen {
                 .build();
         this.addDrawableChild(historialBtn);
 
-        ButtonWidget ssBtn = ButtonWidget.builder(Text.of("SS"), b -> ejecutarSS())
+        ButtonWidget ssComandoBtn = ButtonWidget.builder(Text.of("SS"), b -> ejecutarSS())
                 .dimensions(xBotonesUsuario + anchoBotonUsuario + ESPACIO, usuarioY, anchoBotonUsuario, ALTO)
                 .build();
-        this.addDrawableChild(ssBtn);
+        this.addDrawableChild(ssComandoBtn);
 
         // "Logs" solo tiene sentido para baneos, así que solo se muestra en esa pestaña
         this.logsBtn = ButtonWidget.builder(Text.of("Logs"), b -> ejecutarLogs())
@@ -123,7 +277,19 @@ public class ModeracionScreen extends Screen {
         this.addDrawableChild(logsBtn);
 
         this.filasY0 = usuarioY + ALTO + ESPACIO * 3;
-        this.paginacionY = filasY0 + FILAS_POR_PAGINA * (ALTO + ESPACIO) + ESPACIO;
+
+        // Reserva fija de la parte inferior (paginación, acciones, utilidades y aviso)
+        // para calcular cuántas filas de motivos caben usando TODO el alto disponible.
+        int reservaInferior = (ALTO + ESPACIO * 3)   // hasta accionesY
+                + (ALTO + ESPACIO * 3)               // hasta utilidadesLabelY
+                + 10                                  // hasta utilidadesY
+                + (ALTO + 14)                          // hasta mensajeY
+                + 12;                                  // hasta panelBottomY
+        int espacioParaFilas = panelBottomY - filasY0 - ESPACIO - reservaInferior;
+        int filasCalculadas = espacioParaFilas / (ALTO + ESPACIO);
+        this.filasPorPagina = Math.max(FILAS_MIN, Math.min(FILAS_MAX, filasCalculadas));
+
+        this.paginacionY = filasY0 + filasPorPagina * (ALTO + ESPACIO) + ESPACIO;
         this.accionesY = paginacionY + ALTO + ESPACIO * 3;
 
         this.anteriorBtn = ButtonWidget.builder(Text.of("◀"), b -> cambiarPagina(-1))
@@ -136,9 +302,10 @@ public class ModeracionScreen extends Screen {
         this.addDrawableChild(siguienteBtn);
 
         int anchoCopiar = panelAncho - 90 - ESPACIO;
-        ButtonWidget copiarBtn = ButtonWidget.builder(Text.of("Copiar último"), b -> copiarUltimo())
+        this.copiarBtn = ButtonWidget.builder(Text.of("Copiar último"), b -> copiarUltimo())
                 .dimensions(panelX, accionesY, anchoCopiar, ALTO)
                 .build();
+        this.copiarBtn.visible = (pestanaActual != Pestana.SS);
         this.addDrawableChild(copiarBtn);
 
         ButtonWidget cerrarBtn = ButtonWidget.builder(Text.of("Cerrar"), b -> this.close())
@@ -184,8 +351,24 @@ public class ModeracionScreen extends Screen {
 
         this.mensajeY = utilidadesY + ALTO + 14;
 
-        this.panelTopY = tabsY - PADDING_PANEL;
-        this.panelBottomY = mensajeY + 12;
+        // ---------- Panel de registro (mini chat: logs del servidor + historial) ----------
+        if (this.mostrarRegistro) {
+            int registroTituloY = panelTopY + PADDING_PANEL - 8;
+            int anchoLimpiar = 60;
+            this.limpiarRegistroBtn = ButtonWidget.builder(Text.of("Limpiar"), b -> {
+                        RegistroModeracion.limpiar();
+                        registroCacheTamano = -1; // fuerza reconstrucción del caché
+                        registroScroll = 0;
+                        registroAutoScroll = true;
+                    })
+                    .dimensions(registroX + registroAncho - anchoLimpiar, registroTituloY - 2, anchoLimpiar, 16)
+                    .build();
+            this.addDrawableChild(limpiarRegistroBtn);
+
+            this.registroContenidoY0 = registroTituloY + 16;
+            this.registroContenidoY1 = panelBottomY - PADDING_PANEL;
+            registroCacheTamano = -1; // recalcular al (re)abrir la pantalla
+        }
 
         construirFilas();
         actualizarPaginacion();
@@ -199,21 +382,29 @@ public class ModeracionScreen extends Screen {
         return pestanaActual == Pestana.MUTES ? Config.MOTIVOS_MUTE : Config.MOTIVOS_BAN;
     }
 
+    private int cantidadItemsActual() {
+        return pestanaActual == Pestana.SS ? MENSAJES_SS.length : motivosActuales().length;
+    }
+
     private int paginaActual() {
-        return pestanaActual == Pestana.MUTES ? paginaMutes : paginaBaneos;
+        return switch (pestanaActual) {
+            case MUTES -> paginaMutes;
+            case BANEOS -> paginaBaneos;
+            case SS -> paginaSS;
+        };
     }
 
     private void setPaginaActual(int pagina) {
-        if (pestanaActual == Pestana.MUTES) {
-            paginaMutes = pagina;
-        } else {
-            paginaBaneos = pagina;
+        switch (pestanaActual) {
+            case MUTES -> paginaMutes = pagina;
+            case BANEOS -> paginaBaneos = pagina;
+            case SS -> paginaSS = pagina;
         }
     }
 
     private int totalPaginas() {
-        int total = motivosActuales().length;
-        return Math.max(1, (int) Math.ceil(total / (double) FILAS_POR_PAGINA));
+        int total = cantidadItemsActual();
+        return Math.max(1, (int) Math.ceil(total / (double) filasPorPagina));
     }
 
     // ---------------------------------------------------------------
@@ -224,6 +415,8 @@ public class ModeracionScreen extends Screen {
         if (this.pestanaActual == pestana) return;
         this.pestanaActual = pestana;
         this.logsBtn.visible = (pestana == Pestana.BANEOS);
+        this.copiarBtn.visible = (pestana != Pestana.SS);
+        guardarEstado();
         construirFilas();
         actualizarPaginacion();
     }
@@ -248,10 +441,26 @@ public class ModeracionScreen extends Screen {
         }
         filasBotones.clear();
 
-        Config.Motivo[] motivos = motivosActuales();
         int pagina = paginaActual();
-        int inicio = pagina * FILAS_POR_PAGINA;
-        int fin = Math.min(inicio + FILAS_POR_PAGINA, motivos.length);
+        int inicio = pagina * filasPorPagina;
+
+        if (pestanaActual == Pestana.SS) {
+            int fin = Math.min(inicio + filasPorPagina, MENSAJES_SS.length);
+            for (int i = inicio; i < fin; i++) {
+                MensajeSS item = MENSAJES_SS[i];
+                int fila = i - inicio;
+                int y = filasY0 + fila * (ALTO + ESPACIO);
+                ButtonWidget boton = ButtonWidget.builder(Text.of(item.etiqueta()), b -> ejecutarMensajeSS(item.texto()))
+                        .dimensions(panelX, y, panelAncho, ALTO)
+                        .build();
+                this.addDrawableChild(boton);
+                filasBotones.add(boton);
+            }
+            return;
+        }
+
+        Config.Motivo[] motivos = motivosActuales();
+        int fin = Math.min(inicio + filasPorPagina, motivos.length);
 
         for (int i = inicio; i < fin; i++) {
             Config.Motivo motivo = motivos[i];
@@ -304,6 +513,10 @@ public class ModeracionScreen extends Screen {
         enviar("logs " + usuario);
     }
 
+    private void ejecutarMensajeSS(String texto) {
+        enviarMensaje(texto);
+    }
+
     private void copiarUltimo() {
         String texto = pestanaActual == Pestana.MUTES ? ultimoTextoMute : ultimoTextoBan;
         if (texto.isEmpty()) {
@@ -321,10 +534,12 @@ public class ModeracionScreen extends Screen {
             return null;
         }
         this.ultimoUsuario = usuario;
+        guardarEstado();
         return usuario;
     }
 
     private void enviar(String comando) {
+        registrarHistorial("Comando", "/" + comando);
         if (!Config.ENVIAR_DIRECTO) {
             MinecraftClient.getInstance().setScreen(new net.minecraft.client.gui.screen.ChatScreen("/" + comando));
             return;
@@ -335,8 +550,120 @@ public class ModeracionScreen extends Screen {
         }
     }
 
+    private void enviarMensaje(String texto) {
+        registrarHistorial("Mensaje SS", texto);
+        if (!Config.ENVIAR_DIRECTO) {
+            MinecraftClient.getInstance().setScreen(new net.minecraft.client.gui.screen.ChatScreen(texto));
+            return;
+        }
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (client.player != null && client.player.networkHandler != null) {
+            client.player.networkHandler.sendChatMessage(texto);
+        }
+    }
+
     private void avisar(String texto) {
         this.mensaje = Text.of(texto);
+    }
+
+    // ---------------------------------------------------------------
+    // Guardado en disco: recuerda el usuario y la pestaña entre sesiones,
+    // y deja un registro de cada acción realizada en el panel.
+    // ---------------------------------------------------------------
+
+    private void cargarEstado() {
+        Properties props = new Properties();
+        if (Files.exists(ARCHIVO_ESTADO)) {
+            try (InputStream in = Files.newInputStream(ARCHIVO_ESTADO)) {
+                props.load(in);
+            } catch (IOException ignored) {
+                // si el archivo está dañado, simplemente empieza de cero
+            }
+        }
+        this.ultimoUsuario = props.getProperty("ultimoUsuario", "");
+        try {
+            this.pestanaActual = Pestana.valueOf(props.getProperty("ultimaPestana", "MUTES"));
+        } catch (IllegalArgumentException ignored) {
+            this.pestanaActual = Pestana.MUTES;
+        }
+    }
+
+    private void guardarEstado() {
+        Properties props = new Properties();
+        props.setProperty("ultimoUsuario", this.ultimoUsuario);
+        props.setProperty("ultimaPestana", this.pestanaActual.name());
+        try {
+            Files.createDirectories(ARCHIVO_ESTADO.getParent());
+            try (OutputStream out = Files.newOutputStream(ARCHIVO_ESTADO)) {
+                props.store(out, "Estado del panel de moderación Minebosh");
+            }
+        } catch (IOException ignored) {
+            // si falla el guardado no debe romper el juego
+        }
+    }
+
+    private void registrarHistorial(String tipo, String contenido) {
+        String linea = "[" + LocalDateTime.now().format(FORMATO_FECHA) + "] " + tipo + ": " + contenido;
+        try {
+            Files.createDirectories(ARCHIVO_HISTORIAL.getParent());
+            Files.writeString(ARCHIVO_HISTORIAL, linea + System.lineSeparator(), StandardCharsets.UTF_8,
+                    StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+        } catch (IOException ignored) {
+            // si falla el guardado no debe romper el juego
+        }
+        // También va al mini registro en vivo dentro del panel (pestaña de registro).
+        RegistroModeracion.registrarAccion(tipo + ": " + contenido);
+    }
+
+    // ---------------------------------------------------------------
+    // Panel de registro: reconstruye el caché de líneas ajustadas al
+    // ancho disponible solo cuando cambia el contenido o el tamaño.
+    // ---------------------------------------------------------------
+
+    private void actualizarCacheRegistro() {
+        List<RegistroModeracion.Entrada> entradas = RegistroModeracion.copia();
+        int anchoContenido = registroAncho - PADDING_PANEL * 2;
+        if (entradas.size() == registroCacheTamano && anchoContenido == registroCacheAncho) {
+            return;
+        }
+        registroCacheTamano = entradas.size();
+        registroCacheAncho = anchoContenido;
+        registroLineasCache.clear();
+        registroColoresCache.clear();
+
+        for (RegistroModeracion.Entrada entrada : entradas) {
+            int color = entrada.tipo() == RegistroModeracion.Tipo.CHAT ? COLOR_REGISTRO_CHAT : COLOR_REGISTRO_ACCION;
+            String textoCompleto = "[" + entrada.hora() + "] " + entrada.texto();
+            List<OrderedText> lineas = this.textRenderer.wrapLines(Text.of(textoCompleto), anchoContenido);
+            for (OrderedText linea : lineas) {
+                registroLineasCache.add(linea);
+                registroColoresCache.add(color);
+            }
+        }
+
+        if (registroAutoScroll) {
+            registroScroll = calcularScrollMaximo();
+        } else {
+            registroScroll = Math.min(registroScroll, calcularScrollMaximo());
+        }
+    }
+
+    private int calcularScrollMaximo() {
+        int alturaTotal = registroLineasCache.size() * 10;
+        int alturaVisible = Math.max(0, registroContenidoY1 - registroContenidoY0);
+        return Math.max(0, alturaTotal - alturaVisible);
+    }
+
+    @Override
+    public boolean mouseScrolled(double mouseX, double mouseY, double amount) {
+        if (mostrarRegistro && mouseX >= registroX && mouseX <= registroX + registroAncho
+                && mouseY >= registroContenidoY0 && mouseY <= registroContenidoY1) {
+            int scrollMax = calcularScrollMaximo();
+            registroScroll = (int) Math.max(0, Math.min(scrollMax, registroScroll - amount * 12));
+            registroAutoScroll = (registroScroll >= scrollMax);
+            return true;
+        }
+        return super.mouseScrolled(mouseX, mouseY, amount);
     }
 
     // ---------------------------------------------------------------
@@ -352,11 +679,11 @@ public class ModeracionScreen extends Screen {
         context.fill(panelX - PADDING_PANEL, panelTopY, panelX + panelAncho + PADDING_PANEL, panelTopY + 1, COLOR_BORDE_PANEL);
         context.fill(panelX - PADDING_PANEL, panelBottomY - 1, panelX + panelAncho + PADDING_PANEL, panelBottomY, COLOR_BORDE_PANEL);
 
-        // Franjas alternas detrás de las filas de motivos, para leerlas mejor
-        Config.Motivo[] motivosFondo = motivosActuales();
+        // Franjas alternas detrás de las filas, para leerlas mejor
+        int cantidadFondo = cantidadItemsActual();
         int paginaFondo = paginaActual();
-        int inicioFondo = paginaFondo * FILAS_POR_PAGINA;
-        int finFondo = Math.min(inicioFondo + FILAS_POR_PAGINA, motivosFondo.length);
+        int inicioFondo = paginaFondo * filasPorPagina;
+        int finFondo = Math.min(inicioFondo + filasPorPagina, cantidadFondo);
         for (int i = inicioFondo; i < finFondo; i++) {
             int fila = i - inicioFondo;
             if (fila % 2 == 0) {
@@ -368,30 +695,44 @@ public class ModeracionScreen extends Screen {
         // Separador antes de la fila de utilidades
         context.fill(panelX, utilidadesLabelY - 2, panelX + panelAncho, utilidadesLabelY - 1, COLOR_SEPARADOR);
 
+        // Panel lateral de registro (mini chat con logs del servidor + historial local)
+        if (mostrarRegistro) {
+            context.fill(registroX - PADDING_PANEL, panelTopY, registroX + registroAncho + PADDING_PANEL, panelBottomY, COLOR_FONDO_PANEL);
+            context.fill(registroX - PADDING_PANEL, panelTopY, registroX + registroAncho + PADDING_PANEL, panelTopY + 1, COLOR_BORDE_PANEL);
+            context.fill(registroX - PADDING_PANEL, panelBottomY - 1, registroX + registroAncho + PADDING_PANEL, panelBottomY, COLOR_BORDE_PANEL);
+        }
+
         super.render(context, mouseX, mouseY, delta);
 
         context.drawCenteredTextWithShadow(this.textRenderer, this.title, this.width / 2, tituloY - 10, COLOR_TITULO);
 
-        int mitadTab = panelAncho / 2 - 2;
+        int tercioTab = (panelAncho - ESPACIO * 2) / 3;
         int barraY = tabsY + ALTO + 1;
-        if (pestanaActual == Pestana.MUTES) {
-            context.fill(panelX, barraY, panelX + mitadTab, barraY + 2, COLOR_ACENTO);
-        } else {
-            context.fill(panelX + mitadTab + 4, barraY, panelX + mitadTab + 4 + mitadTab, barraY + 2, COLOR_ACENTO);
+        int barraX;
+        int barraAncho;
+        switch (pestanaActual) {
+            case MUTES -> { barraX = panelX; barraAncho = tercioTab; }
+            case BANEOS -> { barraX = panelX + tercioTab + ESPACIO; barraAncho = tercioTab; }
+            default -> { barraX = panelX + (tercioTab + ESPACIO) * 2; barraAncho = panelAncho - (tercioTab + ESPACIO) * 2; }
         }
+        context.fill(barraX, barraY, barraX + barraAncho, barraY + 2, COLOR_ACENTO);
 
-        Config.Motivo[] motivos = motivosActuales();
-        int pagina = paginaActual();
-        int inicio = pagina * FILAS_POR_PAGINA;
-        int fin = Math.min(inicio + FILAS_POR_PAGINA, motivos.length);
-        for (int i = inicio; i < fin; i++) {
-            int fila = i - inicio;
-            int y = filasY0 + fila * (ALTO + ESPACIO) + (ALTO - 8) / 2;
-            context.drawTextWithShadow(this.textRenderer, Text.of(motivos[i].nombre()), panelX, y, COLOR_TEXTO);
+        if (pestanaActual == Pestana.SS) {
+            context.drawTextWithShadow(this.textRenderer, Text.of("Mensajes SS"), panelX, filasY0 - 11, COLOR_SUAVE);
+        } else {
+            Config.Motivo[] motivos = motivosActuales();
+            int pagina = paginaActual();
+            int inicio = pagina * filasPorPagina;
+            int fin = Math.min(inicio + filasPorPagina, motivos.length);
+            for (int i = inicio; i < fin; i++) {
+                int fila = i - inicio;
+                int y = filasY0 + fila * (ALTO + ESPACIO) + (ALTO - 8) / 2;
+                context.drawTextWithShadow(this.textRenderer, Text.of(motivos[i].nombre()), panelX, y, COLOR_TEXTO);
+            }
         }
 
         if (totalPaginas() > 1) {
-            String texto = "Página " + (pagina + 1) + "/" + totalPaginas();
+            String texto = "Página " + (paginaActual() + 1) + "/" + totalPaginas();
             context.drawCenteredTextWithShadow(this.textRenderer, Text.of(texto), this.width / 2, paginacionY + 6, COLOR_SUAVE);
         }
 
@@ -399,6 +740,41 @@ public class ModeracionScreen extends Screen {
 
         if (!this.mensaje.getString().isEmpty()) {
             context.drawCenteredTextWithShadow(this.textRenderer, this.mensaje, this.width / 2, mensajeY, COLOR_AVISO);
+        }
+
+        if (mostrarRegistro) {
+            renderizarRegistro(context);
+        }
+    }
+
+    private void renderizarRegistro(DrawContext context) {
+        int tituloY = panelTopY + PADDING_PANEL - 8;
+        context.drawTextWithShadow(this.textRenderer, Text.of("Registro (chat + historial)"), registroX, tituloY, COLOR_ACENTO);
+
+        actualizarCacheRegistro();
+
+        if (registroLineasCache.isEmpty()) {
+            context.drawTextWithShadow(this.textRenderer, Text.of("Sin actividad todavía."), registroX, registroContenidoY0 + 2, COLOR_SUAVE);
+            return;
+        }
+
+        context.enableScissor(registroX - PADDING_PANEL, registroContenidoY0, registroX + registroAncho + PADDING_PANEL, registroContenidoY1);
+
+        int alturaTotal = registroLineasCache.size() * 10;
+        int alturaVisible = registroContenidoY1 - registroContenidoY0;
+        int y = registroContenidoY0 - registroScroll + Math.max(0, alturaVisible - alturaTotal);
+
+        for (int i = 0; i < registroLineasCache.size(); i++) {
+            if (y >= registroContenidoY0 - 10 && y <= registroContenidoY1) {
+                context.drawTextWithShadow(this.textRenderer, registroLineasCache.get(i), registroX, y, registroColoresCache.get(i));
+            }
+            y += 10;
+        }
+
+        context.disableScissor();
+
+        if (!registroAutoScroll) {
+            context.drawTextWithShadow(this.textRenderer, Text.of("▼ hay mensajes nuevos, baja con la rueda"), registroX, registroContenidoY1 - 9, COLOR_REGISTRO_HORA);
         }
     }
 
