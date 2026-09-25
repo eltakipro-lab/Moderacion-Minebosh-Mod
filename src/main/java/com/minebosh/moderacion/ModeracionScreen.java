@@ -223,12 +223,19 @@ public class ModeracionScreen extends Screen {
 
         // El mini chat de registro es una cajita fija anclada en la esquina
         // inferior derecha de la pantalla, por encima de todo lo demás.
-        this.mostrarRegistro = this.width >= REGISTRO_ANCHO + REGISTRO_MARGEN * 2 + 40
-                && this.height >= REGISTRO_ALTO + REGISTRO_MARGEN * 2;
         this.registroAncho = REGISTRO_ANCHO;
         this.registroX = this.width - REGISTRO_MARGEN - REGISTRO_ANCHO;
         this.registroCajaBottomY = this.height - REGISTRO_MARGEN;
         this.registroCajaTopY = this.registroCajaBottomY - REGISTRO_ALTO;
+
+        // Solo se muestra si cabe entera en pantalla Y si queda un hueco real
+        // (sin tocar) entre el borde derecho del menú principal y el mini chat,
+        // para que nunca se choquen ni se superpongan.
+        int bordeDerechoPanel = panelX + panelAncho + PADDING_PANEL;
+        int huecoEntrePaneles = (registroX - 8) - bordeDerechoPanel;
+        this.mostrarRegistro = this.width >= REGISTRO_ANCHO + REGISTRO_MARGEN * 2 + 40
+                && this.height >= REGISTRO_ALTO + REGISTRO_MARGEN * 2
+                && huecoEntrePaneles >= 24;
 
         this.tabsY = panelTopY + PADDING_PANEL;
         this.tituloY = tabsY - 20;
