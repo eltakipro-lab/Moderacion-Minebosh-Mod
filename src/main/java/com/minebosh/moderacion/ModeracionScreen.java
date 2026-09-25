@@ -254,6 +254,9 @@ public class ModeracionScreen extends Screen {
         // vuelva a cambiar (no hace falta pulsar ningún botón para que persista).
         this.campoUsuario.setChangedListener(texto -> {
             this.ultimoUsuario = texto;
+            // Quita la sugerencia "Nombre del usuario" en cuanto se escribe algo,
+            // y la vuelve a mostrar si el campo se deja vacío otra vez.
+            this.campoUsuario.setSuggestion(texto.isEmpty() ? "Nombre del usuario" : "");
             guardarEstado();
         });
         this.addDrawableChild(campoUsuario);
