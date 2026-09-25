@@ -39,8 +39,8 @@ public class ModeracionScreen extends Screen {
 
     // ---------- Mini chat de registro (cajita en la esquina) ----------
     private static final int REGISTRO_MARGEN = 40;
-    private static final int REGISTRO_ANCHO = 260;
-    private static final int REGISTRO_ALTO = 160;
+    private static final int REGISTRO_ANCHO = 220;
+    private static final int REGISTRO_ALTO = 220;
     private static final int REGISTRO_TITULO_ALTO = 16;
 
     // ---------- Colores ----------
