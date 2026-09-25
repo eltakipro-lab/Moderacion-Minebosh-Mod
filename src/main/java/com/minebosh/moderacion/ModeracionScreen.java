@@ -7,8 +7,11 @@ import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.client.gui.widget.TextFieldWidget;
+import net.minecraft.text.MutableText;
 import net.minecraft.text.OrderedText;
+import net.minecraft.text.Style;
 import net.minecraft.text.Text;
+import net.minecraft.util.Formatting;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -40,7 +43,6 @@ public class ModeracionScreen extends Screen {
     // ---------- Mini chat de registro (cajita en la esquina) ----------
     private static final int REGISTRO_MARGEN = 40;
     private static final int REGISTRO_ANCHO = 220;
-    private static final int REGISTRO_ALTO = 220;
     private static final int REGISTRO_TITULO_ALTO = 16;
 
     // ---------- Colores ----------
@@ -221,12 +223,13 @@ public class ModeracionScreen extends Screen {
         this.panelTopY = MARGEN_PANTALLA;
         this.panelBottomY = this.height - MARGEN_PANTALLA;
 
-        // El mini chat de registro es una cajita fija anclada en la esquina
-        // inferior derecha de la pantalla, por encima de todo lo demás.
+        // El mini chat de registro va en la esquina derecha, pero su línea
+        // superior y su línea inferior quedan pegadas (a la misma altura)
+        // que las del menú principal, para que ambos paneles casen visualmente.
         this.registroAncho = REGISTRO_ANCHO;
         this.registroX = this.width - REGISTRO_MARGEN - REGISTRO_ANCHO;
-        this.registroCajaBottomY = this.height - REGISTRO_MARGEN;
-        this.registroCajaTopY = this.registroCajaBottomY - REGISTRO_ALTO;
+        this.registroCajaTopY = panelTopY;
+        this.registroCajaBottomY = panelBottomY;
 
         // Solo se muestra si cabe entera en pantalla Y si queda un hueco real
         // (sin tocar) entre el borde derecho del menú principal y el mini chat,
@@ -234,7 +237,7 @@ public class ModeracionScreen extends Screen {
         int bordeDerechoPanel = panelX + panelAncho + PADDING_PANEL;
         int huecoEntrePaneles = (registroX - 8) - bordeDerechoPanel;
         this.mostrarRegistro = this.width >= REGISTRO_ANCHO + REGISTRO_MARGEN * 2 + 40
-                && this.height >= REGISTRO_ALTO + REGISTRO_MARGEN * 2
+                && (registroCajaBottomY - registroCajaTopY) >= 80
                 && huecoEntrePaneles >= 24;
 
         this.tabsY = panelTopY + PADDING_PANEL;
@@ -658,10 +661,21 @@ public class ModeracionScreen extends Screen {
         for (RegistroModeracion.Entrada entrada : entradas) {
             int color = entrada.tipo() == RegistroModeracion.Tipo.CHAT ? COLOR_REGISTRO_CHAT : COLOR_REGISTRO_ACCION;
             String textoCompleto = "[" + entrada.hora() + "] " + entrada.texto();
-            List<OrderedText> lineas = this.textRenderer.wrapLines(Text.of(textoCompleto), anchoContenido);
+
+            // Dentro del resultado de /hist o /logs, la línea con la razón/motivo
+            // se remarca en rojo y negrita para que se vea de un vistazo.
+            boolean esLineaDeRazon = entrada.tipo() == RegistroModeracion.Tipo.CHAT
+                    && contieneRazon(entrada.texto());
+
+            MutableText texto = Text.literal(textoCompleto);
+            if (esLineaDeRazon) {
+                texto.setStyle(Style.EMPTY.withBold(true).withColor(Formatting.RED));
+            }
+
+            List<OrderedText> lineas = this.textRenderer.wrapLines(texto, anchoContenido);
             for (OrderedText linea : lineas) {
                 registroLineasCache.add(linea);
-                registroColoresCache.add(color);
+                registroColoresCache.add(esLineaDeRazon ? Formatting.RED.getColorValue() : color);
             }
         }
 
@@ -670,6 +684,12 @@ public class ModeracionScreen extends Screen {
         } else {
             registroScroll = Math.min(registroScroll, calcularScrollMaximo());
         }
+    }
+
+    /** Detecta la línea de "Razón" / "Motivo" dentro de la respuesta de /hist o /logs. */
+    private boolean contieneRazon(String texto) {
+        String t = texto.toLowerCase();
+        return t.contains("razón") || t.contains("razon") || t.contains("motivo");
     }
 
     private int calcularScrollMaximo() {
