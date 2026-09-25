@@ -38,7 +38,7 @@ public class ModeracionScreen extends Screen {
     private static final int FILAS_MAX = 25;
 
     // ---------- Mini chat de registro (cajita en la esquina) ----------
-    private static final int REGISTRO_MARGEN = 14;
+    private static final int REGISTRO_MARGEN = 40;
     private static final int REGISTRO_ANCHO = 260;
     private static final int REGISTRO_ALTO = 160;
     private static final int REGISTRO_TITULO_ALTO = 16;
@@ -98,9 +98,14 @@ public class ModeracionScreen extends Screen {
         private record Entrada(String hora, Tipo tipo, String texto) {}
 
         private static final int MAX_ENTRADAS = 400;
+        // Tras pulsar "Historial" o "Logs" se capturan los mensajes de chat que
+        // lleguen durante esta ventana de tiempo (la respuesta del servidor a
+        // /hist o /logs); fuera de esa ventana no se guarda el chat normal.
+        private static final long VENTANA_CAPTURA_MS = 8000L;
         private static final DateTimeFormatter FORMATO_HORA = DateTimeFormatter.ofPattern("HH:mm:ss");
         private static final List<Entrada> ENTRADAS = Collections.synchronizedList(new ArrayList<>());
         private static boolean registrado = false;
+        private static volatile long capturaHastaMs = 0L;
 
         static void asegurarRegistro() {
             if (registrado) return;
@@ -108,10 +113,16 @@ public class ModeracionScreen extends Screen {
             // Requiere el módulo fabric-message-api-v1 de Fabric API como dependencia del mod.
             ClientReceiveMessageEvents.GAME.register((message, overlay) -> {
                 if (overlay) return;
+                if (System.currentTimeMillis() > capturaHastaMs) return; // solo interesa /hist y /logs
                 String texto = message.getString();
                 if (texto == null || texto.isBlank()) return;
                 agregar(Tipo.CHAT, texto);
             });
+        }
+
+        /** Abre una ventana de captura de chat: se llama justo al enviar /hist o /logs. */
+        static void iniciarCapturaChat() {
+            capturaHastaMs = System.currentTimeMillis() + VENTANA_CAPTURA_MS;
         }
 
         static void registrarAccion(String texto) {
@@ -205,8 +216,8 @@ public class ModeracionScreen extends Screen {
     protected void init() {
         this.panelAncho = ANCHO_ETIQUETA + (ANCHO_BOTON * 3) + (ESPACIO * 4);
 
-        // El panel principal ocupa toda la ventana (a lo alto sobre todo), centrado.
-        this.panelX = (this.width - panelAncho) / 2;
+        // El panel principal se ancla arriba a la izquierda (no centrado).
+        this.panelX = MARGEN_PANTALLA;
         this.panelTopY = MARGEN_PANTALLA;
         this.panelBottomY = this.height - MARGEN_PANTALLA;
 
@@ -542,6 +553,9 @@ public class ModeracionScreen extends Screen {
     }
 
     private void enviar(String comando) {
+        if (comando.startsWith("hist ") || comando.startsWith("logs ")) {
+            RegistroModeracion.iniciarCapturaChat();
+        }
         registrarHistorial("Comando", "/" + comando);
         if (!Config.ENVIAR_DIRECTO) {
             MinecraftClient.getInstance().setScreen(new net.minecraft.client.gui.screen.ChatScreen("/" + comando));
@@ -708,7 +722,7 @@ public class ModeracionScreen extends Screen {
 
         super.render(context, mouseX, mouseY, delta);
 
-        context.drawCenteredTextWithShadow(this.textRenderer, this.title, this.width / 2, tituloY - 10, COLOR_TITULO);
+        context.drawCenteredTextWithShadow(this.textRenderer, this.title, panelX + panelAncho / 2, tituloY - 10, COLOR_TITULO);
 
         int tercioTab = (panelAncho - ESPACIO * 2) / 3;
         int barraY = tabsY + ALTO + 1;
@@ -737,13 +751,13 @@ public class ModeracionScreen extends Screen {
 
         if (totalPaginas() > 1) {
             String texto = "Página " + (paginaActual() + 1) + "/" + totalPaginas();
-            context.drawCenteredTextWithShadow(this.textRenderer, Text.of(texto), this.width / 2, paginacionY + 6, COLOR_SUAVE);
+            context.drawCenteredTextWithShadow(this.textRenderer, Text.of(texto), panelX + panelAncho / 2, paginacionY + 6, COLOR_SUAVE);
         }
 
-        context.drawCenteredTextWithShadow(this.textRenderer, Text.of("Utilidades"), this.width / 2, utilidadesLabelY - 9, COLOR_SUAVE);
+        context.drawCenteredTextWithShadow(this.textRenderer, Text.of("Utilidades"), panelX + panelAncho / 2, utilidadesLabelY - 9, COLOR_SUAVE);
 
         if (!this.mensaje.getString().isEmpty()) {
-            context.drawCenteredTextWithShadow(this.textRenderer, this.mensaje, this.width / 2, mensajeY, COLOR_AVISO);
+            context.drawCenteredTextWithShadow(this.textRenderer, this.mensaje, panelX + panelAncho / 2, mensajeY, COLOR_AVISO);
         }
 
         if (mostrarRegistro) {
