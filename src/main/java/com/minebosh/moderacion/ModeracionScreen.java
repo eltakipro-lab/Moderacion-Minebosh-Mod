@@ -1,5 +1,6 @@
 package com.minebosh.moderacion;
 
+import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;
 import net.fabricmc.fabric.api.client.message.v1.ClientSendMessageEvents;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.MinecraftClient;
@@ -47,6 +48,7 @@ public class ModeracionScreen extends Screen {
     // ---------- Colores ----------
     private static final int COLOR_TITULO = 0x55FFFF;
     private static final int COLOR_ACENTO = 0xFF55FFFF;
+    private static final int COLOR_ANTICHEAT_SUBTITULO = 0x55FF55;
     private static final int COLOR_TEXTO = 0xFFFFFF;
     private static final int COLOR_SUAVE = 0xAAAAAA;
     private static final int COLOR_AVISO = 0xFFFF55;
@@ -55,7 +57,8 @@ public class ModeracionScreen extends Screen {
     private static final int COLOR_FILA_PAR = 0x14FFFFFF;
     private static final int COLOR_SEPARADOR = 0x40FFFFFF;
     private static final int COLOR_REGISTRO_ACCION = 0xFF7CFF9E;
-    private static final int COLOR_REGISTRO_CHAT = 0xFFA0C8FF;
+    private static final int COLOR_REGISTRO_RESPUESTA = 0xFFA0C8FF;
+    private static final int COLOR_SANCION_BAN = 0xFF55FF55;
     private static final int COLOR_REGISTRO_HORA = 0xFF808080;
 
     // ---------- Guardado en disco ----------
@@ -65,7 +68,112 @@ public class ModeracionScreen extends Screen {
             .resolve("moderacion-minebosh-tabs-historial.log");
     private static final DateTimeFormatter FORMATO_FECHA = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
-    private enum Pestana { MUTES, BANEOS, SS }
+    private enum Pestana { MUTES, BANEOS, SS, ANTICHEAT }
+
+    // ---------- Contenido informativo de la pestaña AntiCheat ----------
+    private enum TipoLineaAntiCheat { TITULO, SUBTITULO, TEXTO, SEPARADOR }
+
+    private record LineaAntiCheat(String texto, TipoLineaAntiCheat tipo) {}
+
+    private static LineaAntiCheat titulo(String t) { return new LineaAntiCheat(t, TipoLineaAntiCheat.TITULO); }
+    private static LineaAntiCheat subtitulo(String t) { return new LineaAntiCheat(t, TipoLineaAntiCheat.SUBTITULO); }
+    private static LineaAntiCheat texto(String t) { return new LineaAntiCheat(t, TipoLineaAntiCheat.TEXTO); }
+    private static LineaAntiCheat separador() { return new LineaAntiCheat("", TipoLineaAntiCheat.SEPARADOR); }
+
+    private static final List<LineaAntiCheat> CONTENIDO_ANTICHEAT = List.of(
+            titulo("Tipos de Alertas y su Validez para SS"),
+
+            subtitulo("Actions (InvalidB)"),
+            texto("Totalmente insegura."),
+            texto("Prohibido llevar a SS solo por esta alerta."),
+            separador(),
+
+            subtitulo("Timer (mínimo 3 alertas)"),
+            texto("Insegura por sí sola."),
+            texto("Con 3 o más alertas es válida para SS."),
+            separador(),
+
+            subtitulo("Aim (mínimo 2 alertas)"),
+            texto("Generalmente muy precisa."),
+            texto("Altamente sospechosa de hacks."),
+            texto("Con 2 alertas es válida."),
+            separador(),
+
+            subtitulo("Invalid A (mínimo 3 alertas)"),
+            texto("Generalmente muy precisa."),
+            texto("Altamente sospechosa de hacks."),
+            texto("Con 3 alertas es válida."),
+            texto("Solo aparece en los logs"),
+            separador(),
+
+            subtitulo("Range (mínimo 2 alertas)"),
+            texto("No es 100% segura."),
+            texto("Con 2 o más alertas es válida para SS."),
+            separador(),
+
+            subtitulo("Combat (InvalidC) (mínimo 2 alertas)"),
+            texto("Insegura en varios casos."),
+            texto("Válida con mínimo 2 alertas."),
+            separador(),
+
+            subtitulo("Clicking (Autoclicker B) (mínimo 1 alerta)"),
+            texto("No se refiere al click normal."),
+            texto("100% confiable."),
+            texto("Con 1 alerta ya es válida para SS."),
+            texto("Aunque en los logs sale como Autoclicker puede llegar a ser autoclicker o hacks."),
+            texto("Cuando lleven por Clicking, preguntar: \"¿Admites uso de hacks o SS?\""),
+            separador(),
+
+            subtitulo("Autoclicker (mínimo 1 alerta) (Solo sale en logs)"),
+            texto("No es 100% segura."),
+            texto("Con 1 alerta ya es válida."),
+            separador(),
+
+            subtitulo("AutoSign (mínimo 2 alertas)"),
+            texto("Aún no sabemos al 100% qué detecta exactamente."),
+            texto("En los casos revisados, cuando se llevó a SS por esta alerta el usuario terminó baneado."),
+            texto("Válida con mínimo 2 alertas."),
+            separador(),
+
+            subtitulo("TriggerBot (mínimo 2 alertas)"),
+            texto("Medianamente segura cuando aparece."),
+            texto("Puede indicar el uso de TriggerBot."),
+            texto("Válida con mínimo 2 alertas."),
+            separador(),
+
+            subtitulo("AutomatedInventory (Solo combinadas)"),
+            texto("Para llevar a revisión a un usuario por esta alerta SOLO podrá ser por alertas combinadas pero tendrán que tener un mínimo:"),
+            texto("Tiene que tener mínimo 7 ALERTAS de este tipo y una de cualquier otro tipo válidas."),
+            separador(),
+
+            subtitulo("AutoTool (Solo combinadas)"),
+            texto("Para llevar a revisión a un usuario por esta alerta SOLO podrá ser por alertas combinadas, pero tendrán que tener un mínimo:"),
+            texto("Tiene que tener mínimo 5 ALERTAS de este tipo y una de cualquier otro tipo válidas."),
+            separador(),
+
+            subtitulo("AutoJumpReset (mínimo 3 alertas)"),
+            texto("No es una alerta totalmente segura."),
+            texto("Aun así, cuando aparece varias veces seguidas normalmente el usuario suele llevar alguna modificación."),
+            texto("Válida con mínimo 3 alertas."),
+            separador(),
+
+            subtitulo("GroundSpoof"),
+            texto("Totalmente insegura."),
+            texto("Prohibido llevar a SS solo por esta alerta."),
+            separador(),
+
+            subtitulo("Inventory (mínimo 2 alertas)"),
+            texto("Insegura, pero utilizable."),
+            texto("Con 2 alertas es válida para SS."),
+            separador(),
+
+            subtitulo("Alertas Combinadas"),
+            texto("Si un usuario activa:"),
+            texto("1 alerta de un tipo"),
+            texto("y 1 alerta de otro tipo distinto"),
+            texto("También es válido llevarlo a SS por alertas combinadas."),
+            texto("Excepto Actions.")
+    );
 
     // ---------- Mensajes predefinidos de la pestaña SS ----------
     private record MensajeSS(String etiqueta, String texto) {}
@@ -95,7 +203,7 @@ public class ModeracionScreen extends Screen {
     // registrarse una vez con el sistema de eventos de Fabric.
     // ---------------------------------------------------------------
     private static final class RegistroModeracion {
-        private enum Tipo { CHAT, ACCION }
+        private enum Tipo { ACCION, RESPUESTA }
         private record Entrada(String hora, Tipo tipo, String texto) {}
 
         private static final int MAX_ENTRADAS = 400;
@@ -107,16 +215,22 @@ public class ModeracionScreen extends Screen {
             if (registrado) return;
             registrado = true;
             // Requiere el módulo fabric-message-api-v1 de Fabric API como dependencia del mod.
-            // Solo escucha lo que el propio jugador envía: sus mensajes de chat
-            // y los comandos que ejecuta (tanto escritos a mano como los que
-            // lanza este panel), nunca lo que llega de otros jugadores o del servidor.
-            ClientSendMessageEvents.CHAT.register(mensaje -> {
-                if (mensaje == null || mensaje.isBlank()) return;
-                agregar(Tipo.CHAT, mensaje);
-            });
+            // Solo se registran comandos (escritos a mano o lanzados desde este panel,
+            // p. ej. /logs, /hist, /ban...) y las respuestas del servidor a esos comandos
+            // (p. ej. el historial de sanciones). El chat normal del jugador ya NO se
+            // registra en el minichat.
             ClientSendMessageEvents.COMMAND.register(comando -> {
                 if (comando == null || comando.isBlank()) return;
                 agregar(Tipo.ACCION, "/" + comando);
+            });
+            // Respuestas/mensajes de sistema que envía el servidor (p. ej. lo que
+            // muestra /logs o /hist debajo del comando). Se ignoran los mensajes de
+            // la action bar (overlay = true), solo interesan los del chat/consola.
+            ClientReceiveMessageEvents.GAME.register((mensaje, overlay) -> {
+                if (overlay || mensaje == null) return;
+                String texto = mensaje.getString();
+                if (texto == null || texto.isBlank()) return;
+                agregar(Tipo.RESPUESTA, texto);
             });
         }
 
@@ -159,12 +273,22 @@ public class ModeracionScreen extends Screen {
     private ButtonWidget tabMutesBtn;
     private ButtonWidget tabBaneosBtn;
     private ButtonWidget tabSSBtn;
+    private ButtonWidget tabAntiCheatBtn;
     private ButtonWidget anteriorBtn;
     private ButtonWidget siguienteBtn;
     private ButtonWidget logsBtn;
     private ButtonWidget copiarBanBtn;
     private ButtonWidget copiarMuteBtn;
     private ButtonWidget limpiarRegistroBtn;
+    private ButtonWidget historialBtn;
+    private ButtonWidget ssComandoBtn;
+
+    // ---------- Panel de la pestaña AntiCheat (texto informativo con scroll) ----------
+    private final List<OrderedText> anticheatLineasCache = new ArrayList<>();
+    private final List<Integer> anticheatColoresCache = new ArrayList<>();
+    private final List<Boolean> anticheatSeparadorCache = new ArrayList<>();
+    private int anticheatCacheAncho = -1;
+    private int anticheatScroll = 0;
 
     private final List<ButtonWidget> filasBotones = new ArrayList<>();
 
@@ -230,20 +354,24 @@ public class ModeracionScreen extends Screen {
         this.tabsY = panelTopY + PADDING_PANEL;
         this.tituloY = tabsY - 20;
 
-        int tercioTab = (panelAncho - ESPACIO * 2) / 3;
-        int ultimoTabAncho = panelAncho - tercioTab * 2 - ESPACIO * 2;
+        int cuartoTab = (panelAncho - ESPACIO * 3) / 4;
+        int ultimoTabAncho = panelAncho - cuartoTab * 3 - ESPACIO * 3;
         this.tabMutesBtn = ButtonWidget.builder(Text.of("Mutes"), b -> cambiarPestana(Pestana.MUTES))
-                .dimensions(panelX, tabsY, tercioTab, ALTO)
+                .dimensions(panelX, tabsY, cuartoTab, ALTO)
                 .build();
         this.tabBaneosBtn = ButtonWidget.builder(Text.of("Baneos"), b -> cambiarPestana(Pestana.BANEOS))
-                .dimensions(panelX + tercioTab + ESPACIO, tabsY, tercioTab, ALTO)
+                .dimensions(panelX + cuartoTab + ESPACIO, tabsY, cuartoTab, ALTO)
                 .build();
         this.tabSSBtn = ButtonWidget.builder(Text.of("SS"), b -> cambiarPestana(Pestana.SS))
-                .dimensions(panelX + (tercioTab + ESPACIO) * 2, tabsY, ultimoTabAncho, ALTO)
+                .dimensions(panelX + (cuartoTab + ESPACIO) * 2, tabsY, cuartoTab, ALTO)
+                .build();
+        this.tabAntiCheatBtn = ButtonWidget.builder(Text.of("AntiCheat"), b -> cambiarPestana(Pestana.ANTICHEAT))
+                .dimensions(panelX + (cuartoTab + ESPACIO) * 3, tabsY, ultimoTabAncho, ALTO)
                 .build();
         this.addDrawableChild(tabMutesBtn);
         this.addDrawableChild(tabBaneosBtn);
         this.addDrawableChild(tabSSBtn);
+        this.addDrawableChild(tabAntiCheatBtn);
 
         this.usuarioY = tabsY + ALTO + ESPACIO * 2;
         int anchoBotonUsuario = 54;
@@ -271,15 +399,21 @@ public class ModeracionScreen extends Screen {
 
         int xBotonesUsuario = panelX + panelAncho - anchoBotonesUsuario;
 
-        ButtonWidget historialBtn = ButtonWidget.builder(Text.of("Historial"), b -> ejecutarHistorial())
+        this.historialBtn = ButtonWidget.builder(Text.of("Historial"), b -> ejecutarHistorial())
                 .dimensions(xBotonesUsuario, usuarioY, anchoBotonUsuario, ALTO)
                 .build();
         this.addDrawableChild(historialBtn);
 
-        ButtonWidget ssComandoBtn = ButtonWidget.builder(Text.of("SS"), b -> ejecutarSS())
+        this.ssComandoBtn = ButtonWidget.builder(Text.of("SS"), b -> ejecutarSS())
                 .dimensions(xBotonesUsuario + anchoBotonUsuario + ESPACIO, usuarioY, anchoBotonUsuario, ALTO)
                 .build();
         this.addDrawableChild(ssComandoBtn);
+
+        // El campo de usuario y sus botones asociados no tienen sentido en la
+        // pestaña AntiCheat (es solo contenido informativo), así que se ocultan.
+        this.campoUsuario.visible = (pestanaActual != Pestana.ANTICHEAT);
+        this.historialBtn.visible = (pestanaActual != Pestana.ANTICHEAT);
+        this.ssComandoBtn.visible = (pestanaActual != Pestana.ANTICHEAT);
 
         // "Logs" solo tiene sentido para baneos, así que solo se muestra en esa pestaña
         this.logsBtn = ButtonWidget.builder(Text.of("Logs"), b -> ejecutarLogs())
@@ -400,6 +534,7 @@ public class ModeracionScreen extends Screen {
     }
 
     private int cantidadItemsActual() {
+        if (pestanaActual == Pestana.ANTICHEAT) return 0; // contenido con scroll propio, no paginado
         return pestanaActual == Pestana.SS ? MENSAJES_SS.length : motivosActuales().length;
     }
 
@@ -408,6 +543,7 @@ public class ModeracionScreen extends Screen {
             case MUTES -> paginaMutes;
             case BANEOS -> paginaBaneos;
             case SS -> paginaSS;
+            case ANTICHEAT -> 0;
         };
     }
 
@@ -416,6 +552,7 @@ public class ModeracionScreen extends Screen {
             case MUTES -> paginaMutes = pagina;
             case BANEOS -> paginaBaneos = pagina;
             case SS -> paginaSS = pagina;
+            case ANTICHEAT -> { /* no aplica */ }
         }
     }
 
@@ -434,6 +571,9 @@ public class ModeracionScreen extends Screen {
         this.logsBtn.visible = (pestana == Pestana.BANEOS);
         this.copiarBanBtn.visible = (pestana == Pestana.BANEOS);
         this.copiarMuteBtn.visible = (pestana == Pestana.MUTES);
+        this.campoUsuario.visible = (pestana != Pestana.ANTICHEAT);
+        this.historialBtn.visible = (pestana != Pestana.ANTICHEAT);
+        this.ssComandoBtn.visible = (pestana != Pestana.ANTICHEAT);
         guardarEstado();
         construirFilas();
         actualizarPaginacion();
@@ -458,6 +598,10 @@ public class ModeracionScreen extends Screen {
             this.remove(boton);
         }
         filasBotones.clear();
+
+        if (pestanaActual == Pestana.ANTICHEAT) {
+            return; // el contenido se dibuja directamente en render(), con scroll propio
+        }
 
         int pagina = paginaActual();
         int inicio = pagina * filasPorPagina;
@@ -663,16 +807,22 @@ public class ModeracionScreen extends Screen {
         registroColoresCache.clear();
 
         for (RegistroModeracion.Entrada entrada : entradas) {
-            int color = entrada.tipo() == RegistroModeracion.Tipo.CHAT ? COLOR_REGISTRO_CHAT : COLOR_REGISTRO_ACCION;
+            int color = entrada.tipo() == RegistroModeracion.Tipo.RESPUESTA ? COLOR_REGISTRO_RESPUESTA : COLOR_REGISTRO_ACCION;
             String textoCompleto = "[" + entrada.hora() + "] " + entrada.texto();
             String comando = entrada.texto();
 
             // /logs entero en rojo y negrita, /hist entero en verde y negrita.
             boolean esLogs = comando.startsWith("/logs ") || comando.equals("/logs");
             boolean esHist = comando.startsWith("/hist ") || comando.equals("/hist");
+            // Respuesta del servidor con una sanción de ban (p. ej. lo que muestra
+            // /logs o /hist debajo del comando: "Fulano fue baneado por Zutano razon: ...").
+            boolean esSancionBan = comando.toLowerCase(java.util.Locale.ROOT).contains("fue baneado por");
 
             MutableText texto = Text.literal(textoCompleto);
-            if (esLogs) {
+            if (esSancionBan) {
+                texto.setStyle(Style.EMPTY.withBold(true).withColor(Formatting.GREEN));
+                color = COLOR_SANCION_BAN;
+            } else if (esLogs) {
                 texto.setStyle(Style.EMPTY.withBold(true).withColor(Formatting.RED));
                 color = Formatting.RED.getColorValue();
             } else if (esHist) {
@@ -709,7 +859,101 @@ public class ModeracionScreen extends Screen {
             registroAutoScroll = (registroScroll >= scrollMax);
             return true;
         }
+        if (pestanaActual == Pestana.ANTICHEAT && mouseX >= panelX && mouseX <= panelX + panelAncho
+                && mouseY >= filasY0 - 4 && mouseY <= paginacionY - ESPACIO) {
+            int scrollMax = calcularScrollMaximoAntiCheat();
+            anticheatScroll = (int) Math.max(0, Math.min(scrollMax, anticheatScroll - amount * 12));
+            return true;
+        }
         return super.mouseScrolled(mouseX, mouseY, amount);
+    }
+
+    private int calcularScrollMaximoAntiCheat() {
+        actualizarCacheAntiCheat();
+        int alturaTotal = 0;
+        for (boolean separador : anticheatSeparadorCache) {
+            alturaTotal += separador ? 6 : 10;
+        }
+        int alturaVisible = Math.max(0, (paginacionY - ESPACIO) - (filasY0 - 4));
+        return Math.max(0, alturaTotal - alturaVisible);
+    }
+
+    // ---------------------------------------------------------------
+    // Pestaña AntiCheat: contenido informativo estático, envuelto al
+    // ancho del panel y desplazable con la rueda del ratón.
+    // ---------------------------------------------------------------
+
+    private void actualizarCacheAntiCheat() {
+        if (anticheatCacheAncho == panelAncho) return;
+        anticheatCacheAncho = panelAncho;
+        anticheatLineasCache.clear();
+        anticheatColoresCache.clear();
+        anticheatSeparadorCache.clear();
+
+        for (LineaAntiCheat linea : CONTENIDO_ANTICHEAT) {
+            if (linea.tipo() == TipoLineaAntiCheat.SEPARADOR) {
+                anticheatLineasCache.add(null);
+                anticheatColoresCache.add(COLOR_SEPARADOR);
+                anticheatSeparadorCache.add(true);
+                continue;
+            }
+
+            int color = switch (linea.tipo()) {
+                case TITULO -> COLOR_TITULO;
+                case SUBTITULO -> COLOR_ANTICHEAT_SUBTITULO;
+                default -> COLOR_TEXTO;
+            };
+
+            String prefijo = linea.tipo() == TipoLineaAntiCheat.TEXTO ? "• " : "";
+            MutableText texto = Text.literal(prefijo + linea.texto());
+            if (linea.tipo() == TipoLineaAntiCheat.TITULO || linea.tipo() == TipoLineaAntiCheat.SUBTITULO) {
+                texto.setStyle(Style.EMPTY.withBold(true));
+            }
+
+            List<OrderedText> envueltas = this.textRenderer.wrapLines(texto, panelAncho);
+            for (OrderedText envuelta : envueltas) {
+                anticheatLineasCache.add(envuelta);
+                anticheatColoresCache.add(color);
+                anticheatSeparadorCache.add(false);
+            }
+        }
+    }
+
+    private void renderizarAntiCheat(DrawContext context) {
+        actualizarCacheAntiCheat();
+
+        int y0 = filasY0 - 4;
+        int y1 = paginacionY - ESPACIO;
+
+        if (anticheatLineasCache.isEmpty()) {
+            context.drawTextWithShadow(this.textRenderer, Text.of("Sin contenido."), panelX, y0, COLOR_SUAVE);
+            return;
+        }
+
+        int scrollMax = calcularScrollMaximoAntiCheat();
+        anticheatScroll = Math.max(0, Math.min(anticheatScroll, scrollMax));
+
+        context.enableScissor(panelX - 4, y0, panelX + panelAncho + 4, y1);
+
+        int y = y0 - anticheatScroll;
+        for (int i = 0; i < anticheatLineasCache.size(); i++) {
+            boolean separador = anticheatSeparadorCache.get(i);
+            int alto = separador ? 6 : 10;
+            if (y + alto >= y0 && y <= y1) {
+                if (separador) {
+                    context.fill(panelX, y + 2, panelX + panelAncho, y + 3, COLOR_SEPARADOR);
+                } else {
+                    context.drawTextWithShadow(this.textRenderer, anticheatLineasCache.get(i), panelX, y, anticheatColoresCache.get(i));
+                }
+            }
+            y += alto;
+        }
+
+        context.disableScissor();
+
+        if (scrollMax > 0) {
+            context.drawTextWithShadow(this.textRenderer, Text.of("▼ desplázate con la rueda"), panelX, y1 - 9, COLOR_REGISTRO_HORA);
+        }
     }
 
     // ---------------------------------------------------------------
@@ -753,19 +997,23 @@ public class ModeracionScreen extends Screen {
 
         context.drawCenteredTextWithShadow(this.textRenderer, this.title, panelX + panelAncho / 2, tituloY - 10, COLOR_TITULO);
 
-        int tercioTab = (panelAncho - ESPACIO * 2) / 3;
+        int cuartoTab = (panelAncho - ESPACIO * 3) / 4;
+        int ultimoTabAncho = panelAncho - cuartoTab * 3 - ESPACIO * 3;
         int barraY = tabsY + ALTO + 1;
         int barraX;
         int barraAncho;
         switch (pestanaActual) {
-            case MUTES -> { barraX = panelX; barraAncho = tercioTab; }
-            case BANEOS -> { barraX = panelX + tercioTab + ESPACIO; barraAncho = tercioTab; }
-            default -> { barraX = panelX + (tercioTab + ESPACIO) * 2; barraAncho = panelAncho - (tercioTab + ESPACIO) * 2; }
+            case MUTES -> { barraX = panelX; barraAncho = cuartoTab; }
+            case BANEOS -> { barraX = panelX + cuartoTab + ESPACIO; barraAncho = cuartoTab; }
+            case SS -> { barraX = panelX + (cuartoTab + ESPACIO) * 2; barraAncho = cuartoTab; }
+            default -> { barraX = panelX + (cuartoTab + ESPACIO) * 3; barraAncho = ultimoTabAncho; }
         }
         context.fill(barraX, barraY, barraX + barraAncho, barraY + 2, COLOR_ACENTO);
 
         if (pestanaActual == Pestana.SS) {
             context.drawTextWithShadow(this.textRenderer, Text.of("Mensajes SS"), panelX, filasY0 - 11, COLOR_SUAVE);
+        } else if (pestanaActual == Pestana.ANTICHEAT) {
+            renderizarAntiCheat(context);
         } else {
             Config.Motivo[] motivos = motivosActuales();
             int pagina = paginaActual();
