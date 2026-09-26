@@ -1,6 +1,6 @@
 package com.minebosh.moderacion;
 
-import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;
+import net.fabricmc.fabric.api.client.message.v1.ClientSendMessageEvents;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
@@ -41,7 +41,6 @@ public class ModeracionScreen extends Screen {
     private static final int FILAS_MAX = 25;
 
     // ---------- Mini chat de registro (cajita en la esquina) ----------
-    private static final int REGISTRO_MARGEN = 40;
     private static final int REGISTRO_ANCHO = 220;
     private static final int REGISTRO_TITULO_ALTO = 16;
 
@@ -100,35 +99,25 @@ public class ModeracionScreen extends Screen {
         private record Entrada(String hora, Tipo tipo, String texto) {}
 
         private static final int MAX_ENTRADAS = 400;
-        // Tras pulsar "Historial" o "Logs" se capturan los mensajes de chat que
-        // lleguen durante esta ventana de tiempo (la respuesta del servidor a
-        // /hist o /logs); fuera de esa ventana no se guarda el chat normal.
-        private static final long VENTANA_CAPTURA_MS = 8000L;
         private static final DateTimeFormatter FORMATO_HORA = DateTimeFormatter.ofPattern("HH:mm:ss");
         private static final List<Entrada> ENTRADAS = Collections.synchronizedList(new ArrayList<>());
         private static boolean registrado = false;
-        private static volatile long capturaHastaMs = 0L;
 
         static void asegurarRegistro() {
             if (registrado) return;
             registrado = true;
             // Requiere el módulo fabric-message-api-v1 de Fabric API como dependencia del mod.
-            ClientReceiveMessageEvents.GAME.register((message, overlay) -> {
-                if (overlay) return;
-                if (System.currentTimeMillis() > capturaHastaMs) return; // solo interesa /hist y /logs
-                String texto = message.getString();
-                if (texto == null || texto.isBlank()) return;
-                agregar(Tipo.CHAT, texto);
+            // Solo escucha lo que el propio jugador envía: sus mensajes de chat
+            // y los comandos que ejecuta (tanto escritos a mano como los que
+            // lanza este panel), nunca lo que llega de otros jugadores o del servidor.
+            ClientSendMessageEvents.CHAT.register(mensaje -> {
+                if (mensaje == null || mensaje.isBlank()) return;
+                agregar(Tipo.CHAT, mensaje);
             });
-        }
-
-        /** Abre una ventana de captura de chat: se llama justo al enviar /hist o /logs. */
-        static void iniciarCapturaChat() {
-            capturaHastaMs = System.currentTimeMillis() + VENTANA_CAPTURA_MS;
-        }
-
-        static void registrarAccion(String texto) {
-            agregar(Tipo.ACCION, texto);
+            ClientSendMessageEvents.COMMAND.register(comando -> {
+                if (comando == null || comando.isBlank()) return;
+                agregar(Tipo.ACCION, "/" + comando);
+            });
         }
 
         private static void agregar(Tipo tipo, String texto) {
@@ -173,7 +162,8 @@ public class ModeracionScreen extends Screen {
     private ButtonWidget anteriorBtn;
     private ButtonWidget siguienteBtn;
     private ButtonWidget logsBtn;
-    private ButtonWidget copiarBtn;
+    private ButtonWidget copiarBanBtn;
+    private ButtonWidget copiarMuteBtn;
     private ButtonWidget limpiarRegistroBtn;
 
     private final List<ButtonWidget> filasBotones = new ArrayList<>();
@@ -223,22 +213,19 @@ public class ModeracionScreen extends Screen {
         this.panelTopY = MARGEN_PANTALLA;
         this.panelBottomY = this.height - MARGEN_PANTALLA;
 
-        // El mini chat de registro va en la esquina derecha, pero su línea
-        // superior y su línea inferior quedan pegadas (a la misma altura)
-        // que las del menú principal, para que ambos paneles casen visualmente.
+        // El mini chat de registro va justo pegado al menú principal: su línea
+        // izquierda coincide exactamente con la línea derecha del menú (sin
+        // hueco, pero sin solaparse), y su línea superior/inferior quedan a la
+        // misma altura que las del menú. El tamaño (REGISTRO_ANCHO) no cambia.
         this.registroAncho = REGISTRO_ANCHO;
-        this.registroX = this.width - REGISTRO_MARGEN - REGISTRO_ANCHO;
+        int bordeDerechoPanel = panelX + panelAncho + PADDING_PANEL;
+        this.registroX = bordeDerechoPanel + 8;
         this.registroCajaTopY = panelTopY;
         this.registroCajaBottomY = panelBottomY;
 
-        // Solo se muestra si cabe entera en pantalla Y si queda un hueco real
-        // (sin tocar) entre el borde derecho del menú principal y el mini chat,
-        // para que nunca se choquen ni se superpongan.
-        int bordeDerechoPanel = panelX + panelAncho + PADDING_PANEL;
-        int huecoEntrePaneles = (registroX - 8) - bordeDerechoPanel;
-        this.mostrarRegistro = this.width >= REGISTRO_ANCHO + REGISTRO_MARGEN * 2 + 40
-                && (registroCajaBottomY - registroCajaTopY) >= 80
-                && huecoEntrePaneles >= 24;
+        // Solo se muestra si cabe entera dentro de la ventana.
+        this.mostrarRegistro = (registroX + registroAncho + MARGEN_PANTALLA) <= this.width
+                && (registroCajaBottomY - registroCajaTopY) >= 80;
 
         this.tabsY = panelTopY + PADDING_PANEL;
         this.tituloY = tabsY - 20;
@@ -327,11 +314,17 @@ public class ModeracionScreen extends Screen {
         this.addDrawableChild(siguienteBtn);
 
         int anchoCopiar = panelAncho - 90 - ESPACIO;
-        this.copiarBtn = ButtonWidget.builder(Text.of("Copiar último"), b -> copiarUltimo())
+        this.copiarBanBtn = ButtonWidget.builder(Text.of("Copiar Último Ban"), b -> copiarUltimoBan())
                 .dimensions(panelX, accionesY, anchoCopiar, ALTO)
                 .build();
-        this.copiarBtn.visible = (pestanaActual != Pestana.SS);
-        this.addDrawableChild(copiarBtn);
+        this.copiarBanBtn.visible = (pestanaActual == Pestana.BANEOS);
+        this.addDrawableChild(copiarBanBtn);
+
+        this.copiarMuteBtn = ButtonWidget.builder(Text.of("Copiar Último Mute"), b -> copiarUltimoMute())
+                .dimensions(panelX, accionesY, anchoCopiar, ALTO)
+                .build();
+        this.copiarMuteBtn.visible = (pestanaActual == Pestana.MUTES);
+        this.addDrawableChild(copiarMuteBtn);
 
         ButtonWidget cerrarBtn = ButtonWidget.builder(Text.of("Cerrar"), b -> this.close())
                 .dimensions(panelX + panelAncho - 90, accionesY, 90, ALTO)
@@ -439,7 +432,8 @@ public class ModeracionScreen extends Screen {
         if (this.pestanaActual == pestana) return;
         this.pestanaActual = pestana;
         this.logsBtn.visible = (pestana == Pestana.BANEOS);
-        this.copiarBtn.visible = (pestana != Pestana.SS);
+        this.copiarBanBtn.visible = (pestana == Pestana.BANEOS);
+        this.copiarMuteBtn.visible = (pestana == Pestana.MUTES);
         guardarEstado();
         construirFilas();
         actualizarPaginacion();
@@ -512,9 +506,11 @@ public class ModeracionScreen extends Screen {
 
         if (pestanaActual == Pestana.MUTES) {
             ultimoTextoMute = texto;
+            guardarEstado();
             enviar(Config.comandoMute(usuario, motivo, nivel));
         } else {
             ultimoTextoBan = texto;
+            guardarEstado();
             enviar(Config.comandoBan(usuario, motivo, nivel));
         }
     }
@@ -541,10 +537,17 @@ public class ModeracionScreen extends Screen {
         enviarMensaje(texto);
     }
 
-    private void copiarUltimo() {
-        String texto = pestanaActual == Pestana.MUTES ? ultimoTextoMute : ultimoTextoBan;
+    private void copiarUltimoBan() {
+        copiarTexto(ultimoTextoBan, "ban");
+    }
+
+    private void copiarUltimoMute() {
+        copiarTexto(ultimoTextoMute, "mute");
+    }
+
+    private void copiarTexto(String texto, String tipo) {
         if (texto.isEmpty()) {
-            avisar("Todavía no hay ninguna acción para copiar.");
+            avisar("Todavía no hay ningún " + tipo + " para copiar.");
             return;
         }
         MinecraftClient.getInstance().keyboard.setClipboard(texto);
@@ -563,9 +566,6 @@ public class ModeracionScreen extends Screen {
     }
 
     private void enviar(String comando) {
-        if (comando.startsWith("hist ") || comando.startsWith("logs ")) {
-            RegistroModeracion.iniciarCapturaChat();
-        }
         registrarHistorial("Comando", "/" + comando);
         if (!Config.ENVIAR_DIRECTO) {
             MinecraftClient.getInstance().setScreen(new net.minecraft.client.gui.screen.ChatScreen("/" + comando));
@@ -608,6 +608,8 @@ public class ModeracionScreen extends Screen {
             }
         }
         this.ultimoUsuario = props.getProperty("ultimoUsuario", "");
+        this.ultimoTextoBan = props.getProperty("ultimoTextoBan", "");
+        this.ultimoTextoMute = props.getProperty("ultimoTextoMute", "");
         try {
             this.pestanaActual = Pestana.valueOf(props.getProperty("ultimaPestana", "MUTES"));
         } catch (IllegalArgumentException ignored) {
@@ -618,6 +620,8 @@ public class ModeracionScreen extends Screen {
     private void guardarEstado() {
         Properties props = new Properties();
         props.setProperty("ultimoUsuario", this.ultimoUsuario);
+        props.setProperty("ultimoTextoBan", this.ultimoTextoBan);
+        props.setProperty("ultimoTextoMute", this.ultimoTextoMute);
         props.setProperty("ultimaPestana", this.pestanaActual.name());
         try {
             Files.createDirectories(ARCHIVO_ESTADO.getParent());
@@ -638,8 +642,8 @@ public class ModeracionScreen extends Screen {
         } catch (IOException ignored) {
             // si falla el guardado no debe romper el juego
         }
-        // También va al mini registro en vivo dentro del panel (pestaña de registro).
-        RegistroModeracion.registrarAccion(tipo + ": " + contenido);
+        // El mini chat de la esquina ya se alimenta solo (ClientSendMessageEvents),
+        // capturando el mensaje/comando real que se envía al servidor.
     }
 
     // ---------------------------------------------------------------
@@ -661,21 +665,25 @@ public class ModeracionScreen extends Screen {
         for (RegistroModeracion.Entrada entrada : entradas) {
             int color = entrada.tipo() == RegistroModeracion.Tipo.CHAT ? COLOR_REGISTRO_CHAT : COLOR_REGISTRO_ACCION;
             String textoCompleto = "[" + entrada.hora() + "] " + entrada.texto();
+            String comando = entrada.texto();
 
-            // Dentro del resultado de /hist o /logs, la línea con la razón/motivo
-            // se remarca en rojo y negrita para que se vea de un vistazo.
-            boolean esLineaDeRazon = entrada.tipo() == RegistroModeracion.Tipo.CHAT
-                    && contieneRazon(entrada.texto());
+            // /logs entero en rojo y negrita, /hist entero en verde y negrita.
+            boolean esLogs = comando.startsWith("/logs ") || comando.equals("/logs");
+            boolean esHist = comando.startsWith("/hist ") || comando.equals("/hist");
 
             MutableText texto = Text.literal(textoCompleto);
-            if (esLineaDeRazon) {
+            if (esLogs) {
                 texto.setStyle(Style.EMPTY.withBold(true).withColor(Formatting.RED));
+                color = Formatting.RED.getColorValue();
+            } else if (esHist) {
+                texto.setStyle(Style.EMPTY.withBold(true).withColor(Formatting.GREEN));
+                color = Formatting.GREEN.getColorValue();
             }
 
             List<OrderedText> lineas = this.textRenderer.wrapLines(texto, anchoContenido);
             for (OrderedText linea : lineas) {
                 registroLineasCache.add(linea);
-                registroColoresCache.add(esLineaDeRazon ? Formatting.RED.getColorValue() : color);
+                registroColoresCache.add(color);
             }
         }
 
@@ -684,12 +692,6 @@ public class ModeracionScreen extends Screen {
         } else {
             registroScroll = Math.min(registroScroll, calcularScrollMaximo());
         }
-    }
-
-    /** Detecta la línea de "Razón" / "Motivo" dentro de la respuesta de /hist o /logs. */
-    private boolean contieneRazon(String texto) {
-        String t = texto.toLowerCase();
-        return t.contains("razón") || t.contains("razon") || t.contains("motivo");
     }
 
     private int calcularScrollMaximo() {
