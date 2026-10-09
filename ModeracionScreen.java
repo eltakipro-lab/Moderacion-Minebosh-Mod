@@ -61,6 +61,7 @@ public class ModeracionScreen extends Screen {
     private static final int COLOR_REGISTRO_RESPUESTA = 0xFFA0C8FF;
     private static final int COLOR_SANCION_BAN = 0xFF55FF55;
     private static final int COLOR_REGISTRO_HORA = 0xFF808080;
+    private static final int COLOR_LINEA = 0xFFFF8C00;
 
     // ---------- Guardado en disco ----------
     private static final Path ARCHIVO_ESTADO = FabricLoader.getInstance().getConfigDir()
@@ -162,23 +163,34 @@ public class ModeracionScreen extends Screen {
         return 0xFF000000 | MathHelper.hsvToRgb(matiz, 0.85f, 1f);
     }
 
-    private static void lineaHorizontal(DrawContext context, int x0, int x1, int y, int grosor) {
+    private static int arcoirisAlfa(float desplazamiento, int alfa) {
+        return (alfa << 24) | (arcoiris(desplazamiento) & 0x00FFFFFF);
+    }
+
+    // Línea de un solo color (separadores, barra de pestaña...). El arcoíris
+    // queda reservado únicamente para el contorno de los paneles.
+    private static void lineaSolida(DrawContext context, int x0, int x1, int y, int grosor, int color) {
+        context.fill(x0, y, x1, y + grosor, color);
+    }
+
+    private static void bordeArcoiris(DrawContext context, int x0, int y0, int x1, int y1, int grosor, int alfa) {
         for (int x = x0; x < x1; x += 2) {
-            context.fill(x, y, Math.min(x + 2, x1), y + grosor, arcoiris((x + y) / 300f));
+            int xe = Math.min(x + 2, x1);
+            context.fill(x, y0, xe, y0 + grosor, arcoirisAlfa((x + y0) / 300f, alfa));
+            context.fill(x, y1 - grosor, xe, y1, arcoirisAlfa((x + y1) / 300f, alfa));
         }
-    }
-
-    private static void lineaVertical(DrawContext context, int x, int y0, int y1, int grosor) {
         for (int y = y0; y < y1; y += 2) {
-            context.fill(x, y, x + grosor, Math.min(y + 2, y1), arcoiris((x + y) / 300f));
+            int ye = Math.min(y + 2, y1);
+            context.fill(x0, y, x0 + grosor, ye, arcoirisAlfa((x0 + y) / 300f, alfa));
+            context.fill(x1 - grosor, y, x1, ye, arcoirisAlfa((x1 + y) / 300f, alfa));
         }
     }
 
+    // Contorno arcoíris grueso (2 px) con un pequeño resplandor por fuera.
     private static void marcoArcoiris(DrawContext context, int x0, int y0, int x1, int y1) {
-        lineaHorizontal(context, x0, x1, y0, 1);
-        lineaHorizontal(context, x0, x1, y1 - 1, 1);
-        lineaVertical(context, x0, y0, y1, 1);
-        lineaVertical(context, x1 - 1, y0, y1, 1);
+        bordeArcoiris(context, x0 - 2, y0 - 2, x1 + 2, y1 + 2, 1, 0x40);
+        bordeArcoiris(context, x0 - 1, y0 - 1, x1 + 1, y1 + 1, 1, 0x90);
+        bordeArcoiris(context, x0, y0, x1, y1, 2, 0xFF);
     }
 
     // ---------------------------------------------------------------
@@ -305,7 +317,7 @@ public class ModeracionScreen extends Screen {
         long t = System.currentTimeMillis();
 
         // Cielo de noche: morado arriba, naranja abajo
-        context.fillGradient(0, 0, this.width, this.height, 0x703A0B5E, 0x70FF6A00);
+        context.fillGradient(0, 0, this.width, this.height, 0x903A0B5E, 0x80FF6A00);
 
         // Estrellas parpadeantes
         for (int i = 0; i + 1 < estrellas.length; i += 2) {
@@ -339,6 +351,90 @@ public class ModeracionScreen extends Screen {
             boolean alasArriba = ((t / 150) + i) % 2 == 0;
             dibujarSprite(context, alasArriba ? SPRITE_MURCIELAGO_ARRIBA : SPRITE_MURCIELAGO_ABAJO, x, y, 2,
                     ch -> ch == 'k' ? 0xFF000000 : 0);
+        }
+
+        dibujarCementerio(context);
+        dibujarNiebla(context, t);
+        dibujarBrasas(context, t);
+        dibujarOjos(context, t);
+    }
+
+    private static final String[] SPRITE_LAPIDA = {
+            "..ssssss..",
+            ".ssssssss.",
+            "ssssddssss",
+            "ssssddssss",
+            "ssdddddsss",
+            "ssssddssss",
+            "ssssddssss",
+            "ssssssssss",
+            "ssssssssss",
+            "ssssssssss",
+            "gggggggggg"
+    };
+
+    private static void dibujarHalo(DrawContext context, int cx, int cy, int radio) {
+        for (int r = radio; r > 0; r -= 3) {
+            for (int yy = -r; yy <= r; yy++) {
+                int ancho = (int) Math.sqrt(r * r - yy * yy);
+                context.fill(cx - ancho, cy + yy, cx + ancho, cy + yy + 1, 0x14FF8C00);
+            }
+        }
+    }
+
+    // Fila de calabazas y lápidas sobre el suelo, en el margen inferior.
+    private void dibujarCementerio(DrawContext context) {
+        context.fill(0, this.height - 3, this.width, this.height, 0xFF120818);
+        for (int i = 0, x = 10; x < this.width - 20; i++, x += 56) {
+            int y = this.height - 14;
+            if (i % 3 == 1) {
+                dibujarSprite(context, SPRITE_LAPIDA, x, y, 1, ch -> switch (ch) {
+                    case 's' -> 0xFF6E6E7A;
+                    case 'd' -> 0xFF3A3A44;
+                    case 'g' -> 0xFF2E6B28;
+                    default -> 0;
+                });
+            } else {
+                dibujarHalo(context, x + 6, y + 5, 12);
+                dibujarCalabaza(context, x, y, 1, i);
+            }
+        }
+    }
+
+    // Niebla baja que se desplaza lentamente.
+    private void dibujarNiebla(DrawContext context, long t) {
+        for (int i = 0; i < 4; i++) {
+            int ancho = 140 + i * 40;
+            int x = (int) ((t / (30 + i * 12)) % (this.width + ancho)) - ancho;
+            int y = this.height - 30 - i * 5;
+            int alfa = 0x18 + i * 4;
+            context.fillGradient(x, y, x + ancho, y + 14, 0x00FFFFFF, (alfa << 24) | 0xFFFFFF);
+        }
+        context.fillGradient(0, this.height - 22, this.width, this.height, 0x00B8A0FF, 0x40B8A0FF);
+    }
+
+    // Brasas / luciérnagas naranjas que suben flotando.
+    private void dibujarBrasas(DrawContext context, long t) {
+        int ancho = Math.max(1, this.width);
+        for (int i = 0; i < 28; i++) {
+            double vel = 0.012 + (i % 5) * 0.005;
+            int y = this.height - (int) ((t * vel + i * 41) % Math.max(1, this.height));
+            int x = (i * 67 + (int) Math.round(Math.sin(t / 900.0 + i) * 8)) % ancho;
+            if (x < 0) x += ancho;
+            int alfa = 80 + (int) (100 * (0.5 + 0.5 * Math.sin(t / 200.0 + i)));
+            int tam = (i % 3 == 0) ? 2 : 1;
+            context.fill(x, y, x + tam, y + tam, (alfa << 24) | (i % 2 == 0 ? 0xFF8C00 : 0xFFD24A));
+        }
+    }
+
+    // Ojos que parpadean en la oscuridad del margen izquierdo.
+    private void dibujarOjos(DrawContext context, long t) {
+        int[] colores = { 0xFFFF2020, 0xFFFFE04A, 0xFF55FF55, 0xFFFF2020 };
+        for (int i = 0; i < 4; i++) {
+            if (((t / 400) + i * 7) % 12 == 0) continue; // parpadeo
+            int y = (this.height / 5) * (i + 1);
+            context.fill(2, y, 4, y + 2, colores[i]);
+            context.fill(6, y, 8, y + 2, colores[i]);
         }
     }
 
@@ -1223,7 +1319,7 @@ public class ModeracionScreen extends Screen {
             int alto = separador ? 6 : 10;
             if (y + alto >= y0 && y <= y1) {
                 if (separador) {
-                    lineaHorizontal(context, panelX, panelX + panelAncho, y + 2, 1);
+                    lineaSolida(context, panelX, panelX + panelAncho, y + 2, 1, 0x80FF8C00);
                 } else {
                     context.drawTextWithShadow(this.textRenderer, anticheatLineasCache.get(i), panelX, y, anticheatColoresCache.get(i));
                 }
@@ -1264,7 +1360,7 @@ public class ModeracionScreen extends Screen {
         }
 
         // Separador antes de la fila de utilidades
-        lineaHorizontal(context, panelX, panelX + panelAncho, utilidadesLabelY - 2, 1);
+        lineaSolida(context, panelX, panelX + panelAncho, utilidadesLabelY - 2, 1, 0x80FF8C00);
 
         // Mini chat de registro: cajita en la esquina, por encima de todo lo demás
         if (mostrarRegistro) {
@@ -1283,7 +1379,7 @@ public class ModeracionScreen extends Screen {
         marcoArcoiris(context, panelX - PADDING_PANEL, panelTopY, panelX + panelAncho + PADDING_PANEL, panelBottomY);
         if (mostrarRegistro) {
             marcoArcoiris(context, registroX - 8, registroCajaTopY, registroX + registroAncho + 8, registroCajaBottomY);
-            lineaHorizontal(context, registroX - 8, registroX + registroAncho + 8, registroCajaTopY + REGISTRO_TITULO_ALTO - 2, 1);
+            lineaSolida(context, registroX - 8, registroX + registroAncho + 8, registroCajaTopY + REGISTRO_TITULO_ALTO - 2, 1, 0x80FF8C00);
         }
 
         // Título con calabazas a los lados
@@ -1291,11 +1387,16 @@ public class ModeracionScreen extends Screen {
         int centroTitulo = panelX + panelAncho / 2;
         int anchoTitulo = this.textRenderer.getWidth(tituloHalloween);
         context.drawCenteredTextWithShadow(this.textRenderer, tituloHalloween, centroTitulo, tituloY - 10, COLOR_TITULO);
+        dibujarHalo(context, centroTitulo - anchoTitulo / 2 - 18 + 6, 9, 14);
+        dibujarHalo(context, centroTitulo + anchoTitulo / 2 + 6 + 6, 9, 14);
         dibujarCalabaza(context, centroTitulo - anchoTitulo / 2 - 18, 4, 1, 0);
         dibujarCalabaza(context, centroTitulo + anchoTitulo / 2 + 6, 4, 1, 1);
 
         // Araña colgando del borde superior del menú
         dibujarArana(context, panelX + panelAncho - 6);
+        if (mostrarRegistro) {
+            dibujarArana(context, registroX + 100);
+        }
 
         int cuartoTab = (panelAncho - ESPACIO * 3) / 4;
         int ultimoTabAncho = panelAncho - cuartoTab * 3 - ESPACIO * 3;
@@ -1308,7 +1409,7 @@ public class ModeracionScreen extends Screen {
             case SS -> { barraX = panelX + (cuartoTab + ESPACIO) * 2; barraAncho = cuartoTab; }
             default -> { barraX = panelX + (cuartoTab + ESPACIO) * 3; barraAncho = ultimoTabAncho; }
         }
-        lineaHorizontal(context, barraX, barraX + barraAncho, barraY, 2);
+        lineaSolida(context, barraX, barraX + barraAncho, barraY, 2, COLOR_LINEA);
 
         if (pestanaActual == Pestana.SS) {
             context.drawTextWithShadow(this.textRenderer, Text.of("Mensajes SS"), panelX, filasY0 - 11, COLOR_SUAVE);
