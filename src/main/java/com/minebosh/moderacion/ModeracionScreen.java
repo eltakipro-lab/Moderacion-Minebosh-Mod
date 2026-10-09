@@ -85,7 +85,7 @@ public class ModeracionScreen extends Screen {
             super(x, y, ancho, alto, texto, accion, DEFAULT_NARRATION_SUPPLIER);
         }
 
-        static Constructor builder(Text texto, ButtonWidget.PressAction accion) {
+        static Constructor nuevo(Text texto, ButtonWidget.PressAction accion) {
             return new Constructor(texto, accion);
         }
 
@@ -734,16 +734,16 @@ public class ModeracionScreen extends Screen {
 
         int cuartoTab = (panelAncho - ESPACIO * 3) / 4;
         int ultimoTabAncho = panelAncho - cuartoTab * 3 - ESPACIO * 3;
-        this.tabMutesBtn = BotonNaranja.builder(Text.of("Mutes"), b -> cambiarPestana(Pestana.MUTES))
+        this.tabMutesBtn = BotonNaranja.nuevo(Text.of("Mutes"), b -> cambiarPestana(Pestana.MUTES))
                 .dimensions(panelX, tabsY, cuartoTab, ALTO)
                 .build();
-        this.tabBaneosBtn = BotonNaranja.builder(Text.of("Baneos"), b -> cambiarPestana(Pestana.BANEOS))
+        this.tabBaneosBtn = BotonNaranja.nuevo(Text.of("Baneos"), b -> cambiarPestana(Pestana.BANEOS))
                 .dimensions(panelX + cuartoTab + ESPACIO, tabsY, cuartoTab, ALTO)
                 .build();
-        this.tabSSBtn = BotonNaranja.builder(Text.of("SS"), b -> cambiarPestana(Pestana.SS))
+        this.tabSSBtn = BotonNaranja.nuevo(Text.of("SS"), b -> cambiarPestana(Pestana.SS))
                 .dimensions(panelX + (cuartoTab + ESPACIO) * 2, tabsY, cuartoTab, ALTO)
                 .build();
-        this.tabAntiCheatBtn = BotonNaranja.builder(Text.of("AntiCheat"), b -> cambiarPestana(Pestana.ANTICHEAT))
+        this.tabAntiCheatBtn = BotonNaranja.nuevo(Text.of("AntiCheat"), b -> cambiarPestana(Pestana.ANTICHEAT))
                 .dimensions(panelX + (cuartoTab + ESPACIO) * 3, tabsY, ultimoTabAncho, ALTO)
                 .build();
         this.addDrawableChild(tabMutesBtn);
@@ -777,12 +777,12 @@ public class ModeracionScreen extends Screen {
 
         int xBotonesUsuario = panelX + panelAncho - anchoBotonesUsuario;
 
-        this.historialBtn = BotonNaranja.builder(Text.of("Historial"), b -> ejecutarHistorial())
+        this.historialBtn = BotonNaranja.nuevo(Text.of("Historial"), b -> ejecutarHistorial())
                 .dimensions(xBotonesUsuario, usuarioY, anchoBotonUsuario, ALTO)
                 .build();
         this.addDrawableChild(historialBtn);
 
-        this.ssComandoBtn = BotonNaranja.builder(Text.of("SS"), b -> ejecutarSS())
+        this.ssComandoBtn = BotonNaranja.nuevo(Text.of("SS"), b -> ejecutarSS())
                 .dimensions(xBotonesUsuario + anchoBotonUsuario + ESPACIO, usuarioY, anchoBotonUsuario, ALTO)
                 .build();
         this.addDrawableChild(ssComandoBtn);
@@ -794,7 +794,7 @@ public class ModeracionScreen extends Screen {
         this.ssComandoBtn.visible = (pestanaActual != Pestana.ANTICHEAT);
 
         // "Logs" solo tiene sentido para baneos, así que solo se muestra en esa pestaña
-        this.logsBtn = BotonNaranja.builder(Text.of("Logs"), b -> ejecutarLogs())
+        this.logsBtn = BotonNaranja.nuevo(Text.of("Logs"), b -> ejecutarLogs())
                 .dimensions(xBotonesUsuario + (anchoBotonUsuario + ESPACIO) * 2, usuarioY, anchoBotonUsuario, ALTO)
                 .build();
         this.logsBtn.visible = (pestanaActual == Pestana.BANEOS);
@@ -816,29 +816,29 @@ public class ModeracionScreen extends Screen {
         this.paginacionY = filasY0 + filasPorPagina * (ALTO + ESPACIO) + ESPACIO;
         this.accionesY = paginacionY + ALTO + ESPACIO * 3;
 
-        this.anteriorBtn = BotonNaranja.builder(Text.of("◀"), b -> cambiarPagina(-1))
+        this.anteriorBtn = BotonNaranja.nuevo(Text.of("◀"), b -> cambiarPagina(-1))
                 .dimensions(panelX, paginacionY, 40, ALTO)
                 .build();
-        this.siguienteBtn = BotonNaranja.builder(Text.of("▶"), b -> cambiarPagina(1))
+        this.siguienteBtn = BotonNaranja.nuevo(Text.of("▶"), b -> cambiarPagina(1))
                 .dimensions(panelX + panelAncho - 40, paginacionY, 40, ALTO)
                 .build();
         this.addDrawableChild(anteriorBtn);
         this.addDrawableChild(siguienteBtn);
 
         int anchoCopiar = panelAncho - 90 - ESPACIO;
-        this.copiarBanBtn = BotonNaranja.builder(Text.of("Copiar Último Ban"), b -> copiarUltimoBan())
+        this.copiarBanBtn = BotonNaranja.nuevo(Text.of("Copiar Último Ban"), b -> copiarUltimoBan())
                 .dimensions(panelX, accionesY, anchoCopiar, ALTO)
                 .build();
         this.copiarBanBtn.visible = (pestanaActual == Pestana.BANEOS);
         this.addDrawableChild(copiarBanBtn);
 
-        this.copiarMuteBtn = BotonNaranja.builder(Text.of("Copiar Último Mute"), b -> copiarUltimoMute())
+        this.copiarMuteBtn = BotonNaranja.nuevo(Text.of("Copiar Último Mute"), b -> copiarUltimoMute())
                 .dimensions(panelX, accionesY, anchoCopiar, ALTO)
                 .build();
         this.copiarMuteBtn.visible = (pestanaActual == Pestana.MUTES);
         this.addDrawableChild(copiarMuteBtn);
 
-        ButtonWidget cerrarBtn = BotonNaranja.builder(Text.of("Cerrar"), b -> this.close())
+        ButtonWidget cerrarBtn = BotonNaranja.nuevo(Text.of("Cerrar"), b -> this.close())
                 .dimensions(panelX + panelAncho - 90, accionesY, 90, ALTO)
                 .build();
         this.addDrawableChild(cerrarBtn);
@@ -850,31 +850,31 @@ public class ModeracionScreen extends Screen {
         int anchoUtil = (panelAncho - ESPACIO * 4) / 5;
         int xUtil = panelX;
 
-        ButtonWidget vanishBtn = BotonNaranja.builder(Text.of("Vanish"), b -> enviar("vanish"))
+        ButtonWidget vanishBtn = BotonNaranja.nuevo(Text.of("Vanish"), b -> enviar("vanish"))
                 .dimensions(xUtil, utilidadesY, anchoUtil, ALTO)
                 .build();
         this.addDrawableChild(vanishBtn);
         xUtil += anchoUtil + ESPACIO;
 
-        ButtonWidget flyBtn = BotonNaranja.builder(Text.of("Fly"), b -> enviar("fly"))
+        ButtonWidget flyBtn = BotonNaranja.nuevo(Text.of("Fly"), b -> enviar("fly"))
                 .dimensions(xUtil, utilidadesY, anchoUtil, ALTO)
                 .build();
         this.addDrawableChild(flyBtn);
         xUtil += anchoUtil + ESPACIO;
 
-        ButtonWidget velSueloBtn = BotonNaranja.builder(Text.of("Vel. Suelo"), b -> enviar("flyspeed walk 10"))
+        ButtonWidget velSueloBtn = BotonNaranja.nuevo(Text.of("Vel. Suelo"), b -> enviar("flyspeed walk 10"))
                 .dimensions(xUtil, utilidadesY, anchoUtil, ALTO)
                 .build();
         this.addDrawableChild(velSueloBtn);
         xUtil += anchoUtil + ESPACIO;
 
-        ButtonWidget velVueloBtn = BotonNaranja.builder(Text.of("Vel. Vuelo"), b -> enviar("flyspeed fly 4"))
+        ButtonWidget velVueloBtn = BotonNaranja.nuevo(Text.of("Vel. Vuelo"), b -> enviar("flyspeed fly 4"))
                 .dimensions(xUtil, utilidadesY, anchoUtil, ALTO)
                 .build();
         this.addDrawableChild(velVueloBtn);
         xUtil += anchoUtil + ESPACIO;
 
-        ButtonWidget alertsBtn = BotonNaranja.builder(Text.of("Alertas"), b -> enviar("alerts"))
+        ButtonWidget alertsBtn = BotonNaranja.nuevo(Text.of("Alertas"), b -> enviar("alerts"))
                 .dimensions(xUtil, utilidadesY, anchoUtil, ALTO)
                 .build();
         this.addDrawableChild(alertsBtn);
@@ -884,7 +884,7 @@ public class ModeracionScreen extends Screen {
         // ---------- Mini chat de registro: cajita en la esquina inferior derecha ----------
         if (this.mostrarRegistro) {
             int anchoLimpiar = 50;
-            this.limpiarRegistroBtn = BotonNaranja.builder(Text.of("Limpiar"), b -> {
+            this.limpiarRegistroBtn = BotonNaranja.nuevo(Text.of("Limpiar"), b -> {
                         RegistroModeracion.limpiar();
                         registroCacheTamano = -1; // fuerza reconstrucción del caché
                         registroScroll = 0;
@@ -990,7 +990,7 @@ public class ModeracionScreen extends Screen {
                 MensajeSS item = MENSAJES_SS[i];
                 int fila = i - inicio;
                 int y = filasY0 + fila * (ALTO + ESPACIO);
-                ButtonWidget boton = BotonNaranja.builder(Text.of(item.etiqueta()), b -> ejecutarMensajeSS(item.texto()))
+                ButtonWidget boton = BotonNaranja.nuevo(Text.of(item.etiqueta()), b -> ejecutarMensajeSS(item.texto()))
                         .dimensions(panelX, y, panelAncho, ALTO)
                         .build();
                 this.addDrawableChild(boton);
@@ -1010,7 +1010,7 @@ public class ModeracionScreen extends Screen {
                 final int nivelFinal = nivel; // copia final para poder usarla dentro de la lambda
                 int x = panelX + ANCHO_ETIQUETA + ESPACIO + (nivel - 1) * (ANCHO_BOTON + ESPACIO);
                 String etiqueta = "#" + nivel + " (" + motivo.tiempo(nivel) + ")";
-                ButtonWidget boton = BotonNaranja.builder(Text.of(etiqueta), b -> ejecutarAccion(motivo, nivelFinal))
+                ButtonWidget boton = BotonNaranja.nuevo(Text.of(etiqueta), b -> ejecutarAccion(motivo, nivelFinal))
                         .dimensions(x, y, ANCHO_BOTON, ALTO)
                         .build();
                 this.addDrawableChild(boton);
