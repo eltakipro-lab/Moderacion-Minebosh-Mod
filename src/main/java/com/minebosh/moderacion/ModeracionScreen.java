@@ -4,6 +4,7 @@ import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;
 import net.fabricmc.fabric.api.client.message.v1.ClientSendMessageEvents;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.font.TextRenderer;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.widget.ButtonWidget;
@@ -13,6 +14,7 @@ import net.minecraft.text.OrderedText;
 import net.minecraft.text.Style;
 import net.minecraft.text.Text;
 import net.minecraft.util.Formatting;
+import net.minecraft.util.math.MathHelper;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -46,20 +48,20 @@ public class ModeracionScreen extends Screen {
     private static final int REGISTRO_TITULO_ALTO = 16;
 
     // ---------- Colores ----------
-    private static final int COLOR_TITULO = 0x55FFFF;
-    private static final int COLOR_ACENTO = 0xFF55FFFF;
+    private static final int COLOR_TITULO = 0xFFA500;
+    private static final int COLOR_ACENTO = 0xFFFF8C00;
     private static final int COLOR_ANTICHEAT_SUBTITULO = 0x55FF55;
     private static final int COLOR_TEXTO = 0xFFFFFF;
     private static final int COLOR_SUAVE = 0xAAAAAA;
     private static final int COLOR_AVISO = 0xFFFF55;
-    private static final int COLOR_FONDO_PANEL = 0xC8141420;
-    private static final int COLOR_BORDE_PANEL = 0xFF3AA0FF;
-    private static final int COLOR_FILA_PAR = 0x14FFFFFF;
+    private static final int COLOR_FONDO_PANEL = 0xD01C0A2A;
+    private static final int COLOR_FILA_PAR = 0x20FF8C00;
     private static final int COLOR_SEPARADOR = 0x40FFFFFF;
     private static final int COLOR_REGISTRO_ACCION = 0xFF7CFF9E;
     private static final int COLOR_REGISTRO_RESPUESTA = 0xFFA0C8FF;
     private static final int COLOR_SANCION_BAN = 0xFF55FF55;
     private static final int COLOR_REGISTRO_HORA = 0xFF808080;
+    private static final int COLOR_LINEA = 0xFFFF8C00;
 
     // ---------- Guardado en disco ----------
     private static final Path ARCHIVO_ESTADO = FabricLoader.getInstance().getConfigDir()
@@ -67,6 +69,374 @@ public class ModeracionScreen extends Screen {
     private static final Path ARCHIVO_HISTORIAL = FabricLoader.getInstance().getConfigDir()
             .resolve("moderacion-minebosh-tabs-historial.log");
     private static final DateTimeFormatter FORMATO_FECHA = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+
+    // ---------------------------------------------------------------
+    // Botón naranja con letras negras y contorno blanco.
+    // Usa la misma cadena builder(...).dimensions(...).build() que el
+    // ButtonWidget normal, así el resto del código no cambia.
+    // ---------------------------------------------------------------
+    private static final class BotonNaranja extends ButtonWidget {
+        private static final int NARANJA = 0xFFFF8C00;
+        private static final int NARANJA_HOVER = 0xFFFFB347;
+        private static final int NARANJA_BORDE = 0xFFB35F00;
+        private static final int NARANJA_INACTIVO = 0xFF9A7B4F;
+
+        private BotonNaranja(int x, int y, int ancho, int alto, Text texto, ButtonWidget.PressAction accion) {
+            super(x, y, ancho, alto, texto, accion, DEFAULT_NARRATION_SUPPLIER);
+        }
+
+        static Constructor builder(Text texto, ButtonWidget.PressAction accion) {
+            return new Constructor(texto, accion);
+        }
+
+        static final class Constructor {
+            private final Text texto;
+            private final ButtonWidget.PressAction accion;
+            private int x, y, ancho = 150, alto = 20;
+
+            private Constructor(Text texto, ButtonWidget.PressAction accion) {
+                this.texto = texto;
+                this.accion = accion;
+            }
+
+            Constructor dimensions(int x, int y, int ancho, int alto) {
+                this.x = x;
+                this.y = y;
+                this.ancho = ancho;
+                this.alto = alto;
+                return this;
+            }
+
+            BotonNaranja build() {
+                return new BotonNaranja(x, y, ancho, alto, texto, accion);
+            }
+        }
+
+        @Override
+        public void renderButton(DrawContext context, int mouseX, int mouseY, float delta) {
+            int x = getX();
+            int y = getY();
+            int w = getWidth();
+            int h = getHeight();
+
+            int fondo = !this.active ? NARANJA_INACTIVO : (this.isHovered() ? NARANJA_HOVER : NARANJA);
+            context.fill(x, y, x + w, y + h, NARANJA_BORDE);
+            context.fill(x + 1, y + 1, x + w - 1, y + h - 1, fondo);
+            context.fill(x + 1, y + 1, x + w - 1, y + 2, 0x55FFFFFF); // pequeño brillo arriba
+
+            TextRenderer tr = MinecraftClient.getInstance().textRenderer;
+            OrderedText texto = this.getMessage().asOrderedText();
+            int anchoTexto = tr.getWidth(texto);
+
+            // Si el texto es más ancho que el botón se reduce para que quepa entero.
+            float escala = anchoTexto > w - 6 ? (w - 6) / (float) anchoTexto : 1f;
+            float anchoFinal = anchoTexto * escala;
+            float tx = x + (w - anchoFinal) / 2f;
+            float ty = y + (h - 8 * escala) / 2f;
+
+            context.getMatrices().push();
+            context.getMatrices().translate(tx, ty, 0);
+            context.getMatrices().scale(escala, escala, 1f);
+
+            // Contorno blanco: el texto blanco desplazado 1px en las 8 direcciones...
+            for (int dx = -1; dx <= 1; dx++) {
+                for (int dy = -1; dy <= 1; dy++) {
+                    if (dx == 0 && dy == 0) continue;
+                    context.drawText(tr, texto, dx, dy, 0xFFFFFFFF, false);
+                }
+            }
+            // ...y encima el texto negro.
+            context.drawText(tr, texto, 0, 0, 0xFF000000, false);
+
+            context.getMatrices().pop();
+        }
+    }
+
+    // ---------------------------------------------------------------
+    // Líneas arcoíris animadas: el color recorre todo el espectro con
+    // el tiempo y además varía a lo largo de la propia línea.
+    // ---------------------------------------------------------------
+    private static int arcoiris(float desplazamiento) {
+        float fase = (System.currentTimeMillis() % 4000L) / 4000f;
+        float matiz = (fase + desplazamiento) % 1f;
+        if (matiz < 0) matiz += 1f;
+        return 0xFF000000 | MathHelper.hsvToRgb(matiz, 0.85f, 1f);
+    }
+
+    private static int arcoirisAlfa(float desplazamiento, int alfa) {
+        return (alfa << 24) | (arcoiris(desplazamiento) & 0x00FFFFFF);
+    }
+
+    // Línea de un solo color (separadores, barra de pestaña...). El arcoíris
+    // queda reservado únicamente para el contorno de los paneles.
+    private static void lineaSolida(DrawContext context, int x0, int x1, int y, int grosor, int color) {
+        context.fill(x0, y, x1, y + grosor, color);
+    }
+
+    private static void bordeArcoiris(DrawContext context, int x0, int y0, int x1, int y1, int grosor, int alfa) {
+        for (int x = x0; x < x1; x += 2) {
+            int xe = Math.min(x + 2, x1);
+            context.fill(x, y0, xe, y0 + grosor, arcoirisAlfa((x + y0) / 300f, alfa));
+            context.fill(x, y1 - grosor, xe, y1, arcoirisAlfa((x + y1) / 300f, alfa));
+        }
+        for (int y = y0; y < y1; y += 2) {
+            int ye = Math.min(y + 2, y1);
+            context.fill(x0, y, x0 + grosor, ye, arcoirisAlfa((x0 + y) / 300f, alfa));
+            context.fill(x1 - grosor, y, x1, ye, arcoirisAlfa((x1 + y) / 300f, alfa));
+        }
+    }
+
+    // Contorno arcoíris grueso (2 px) con un pequeño resplandor por fuera.
+    private static void marcoArcoiris(DrawContext context, int x0, int y0, int x1, int y1) {
+        bordeArcoiris(context, x0 - 2, y0 - 2, x1 + 2, y1 + 2, 1, 0x40);
+        bordeArcoiris(context, x0 - 1, y0 - 1, x1 + 1, y1 + 1, 1, 0x90);
+        bordeArcoiris(context, x0, y0, x1, y1, 2, 0xFF);
+    }
+
+    // ---------------------------------------------------------------
+    // Halloween: dibujos hechos píxel a píxel (no dependen de fuentes
+    // ni de texturas externas) y ambiente animado.
+    // ---------------------------------------------------------------
+    private static final String[] SPRITE_CALABAZA = {
+            "....ggg.....",
+            "..oooggooo..",
+            ".oooooooooo.",
+            "oooooooooooo",
+            "ooyyooooyyoo",
+            "ooyyooooyyoo",
+            "oooooyyooooo",
+            "ooyyyyyyyyoo",
+            "ooyoyyyyoyoo",
+            ".oooooooooo.",
+            "..oooooooo.."
+    };
+
+    private static final String[] SPRITE_MURCIELAGO_ARRIBA = {
+            "kk.....kk",
+            "kkk.k.kkk",
+            ".kkkkkkk.",
+            "..kkkkk..",
+            "...k.k..."
+    };
+
+    private static final String[] SPRITE_MURCIELAGO_ABAJO = {
+            "....k....",
+            ".kk.k.kk.",
+            "kkkkkkkkk",
+            ".kkkkkkk.",
+            "..k...k.."
+    };
+
+    private static final String[] SPRITE_FANTASMA = {
+            "...wwww...",
+            "..wwwwww..",
+            ".wwwwwwww.",
+            ".wkkwwkkw.",
+            ".wkkwwkkw.",
+            ".wwwwwwww.",
+            ".wwwkkwww.",
+            ".wwwkkwww.",
+            ".wwwwwwww.",
+            ".ww.ww.ww.",
+            "w.ww.ww.ww"
+    };
+
+    private int[] estrellas = new int[0]; // pares x,y
+
+    private static void dibujarSprite(DrawContext context, String[] filas, int x, int y, int escala,
+                                      java.util.function.IntUnaryOperator colorDe) {
+        for (int fy = 0; fy < filas.length; fy++) {
+            String fila = filas[fy];
+            for (int fx = 0; fx < fila.length(); fx++) {
+                int color = colorDe.applyAsInt(fila.charAt(fx));
+                if (color == 0) continue;
+                context.fill(x + fx * escala, y + fy * escala, x + (fx + 1) * escala, y + (fy + 1) * escala, color);
+            }
+        }
+    }
+
+    private static void dibujarCalabaza(DrawContext context, int x, int y, int escala, int desfase) {
+        boolean parpadeo = ((System.currentTimeMillis() / 250) + desfase) % 2 == 0;
+        int ojos = parpadeo ? 0xFFFFE04A : 0xFFFFB300;
+        dibujarSprite(context, SPRITE_CALABAZA, x, y, escala, ch -> switch (ch) {
+            case 'o' -> 0xFFFF7A00;
+            case 'g' -> 0xFF3FA535;
+            case 'y' -> ojos;
+            default -> 0;
+        });
+    }
+
+    private static void dibujarTelarana(DrawContext context, int cx, int cy, int dx, int dy, int tam) {
+        int color = 0x99FFFFFF;
+        // hilos radiales
+        for (int i = 0; i <= tam; i++) {
+            context.fill(cx + dx * i, cy, cx + dx * i + 1, cy + 1, color);
+            context.fill(cx, cy + dy * i, cx + 1, cy + dy * i + 1, color);
+            context.fill(cx + dx * i, cy + dy * i, cx + dx * i + 1, cy + dy * i + 1, color);
+            context.fill(cx + dx * i, cy + dy * (i / 2), cx + dx * i + 1, cy + dy * (i / 2) + 1, color);
+            context.fill(cx + dx * (i / 2), cy + dy * i, cx + dx * (i / 2) + 1, cy + dy * i + 1, color);
+        }
+        // hilos en arco
+        for (int r = tam / 3; r <= tam; r += tam / 3) {
+            for (int grados = 0; grados <= 90; grados += 3) {
+                double rad = Math.toRadians(grados);
+                int px = cx + dx * (int) Math.round(r * Math.cos(rad));
+                int py = cy + dy * (int) Math.round(r * Math.sin(rad));
+                context.fill(px, py, px + 1, py + 1, color);
+            }
+        }
+    }
+
+    private static void dibujarArana(DrawContext context, int x) {
+        double t = System.currentTimeMillis() / 700.0;
+        int largo = 14 + (int) Math.round(6 * Math.sin(t));
+        context.fill(x, 0, x + 1, largo, 0xCCFFFFFF);                 // hilo
+        int pata = 0xFF8A8A8A;
+        context.fill(x - 5, largo + 1, x - 2, largo + 2, pata);       // patas
+        context.fill(x - 4, largo + 3, x - 2, largo + 4, pata);
+        context.fill(x + 3, largo + 1, x + 6, largo + 2, pata);
+        context.fill(x + 3, largo + 3, x + 5, largo + 4, pata);
+        context.fill(x - 2, largo, x + 3, largo + 5, 0xFF3A3A3A);     // cuerpo
+        context.fill(x - 1, largo + 1, x, largo + 2, 0xFFFF2020);     // ojos
+        context.fill(x + 1, largo + 1, x + 2, largo + 2, 0xFFFF2020);
+    }
+
+    private static void dibujarLuna(DrawContext context, int cx, int cy) {
+        int radio = 11;
+        for (int yy = -radio; yy <= radio; yy++) {
+            int ancho = (int) Math.sqrt(radio * radio - yy * yy);
+            context.fill(cx - ancho, cy + yy, cx + ancho, cy + yy + 1, 0xFFFFF4B0);
+        }
+        int crater = 0xFFE6D890;
+        context.fill(cx - 5, cy - 4, cx - 2, cy - 1, crater);
+        context.fill(cx + 2, cy + 1, cx + 6, cy + 4, crater);
+        context.fill(cx - 3, cy + 5, cx - 1, cy + 7, crater);
+    }
+
+    private void dibujarAmbienteHalloween(DrawContext context) {
+        long t = System.currentTimeMillis();
+
+        // Cielo de noche: morado arriba, naranja abajo
+        context.fillGradient(0, 0, this.width, this.height, 0x903A0B5E, 0x80FF6A00);
+
+        // Estrellas parpadeantes
+        for (int i = 0; i + 1 < estrellas.length; i += 2) {
+            double brillo = 0.5 + 0.5 * Math.sin(t / 500.0 + i);
+            int alfa = 40 + (int) (brillo * 140);
+            context.fill(estrellas[i], estrellas[i + 1], estrellas[i] + 1, estrellas[i + 1] + 1, (alfa << 24) | 0xFFFFFF);
+        }
+
+        // Luna y fantasma solo si caben en el espacio libre a la derecha de los paneles
+        int limite = mostrarRegistro ? registroX + registroAncho + 8 : panelX + panelAncho + PADDING_PANEL;
+        int lunaX = this.width - 30;
+        if (lunaX - 12 >= limite + 4) {
+            dibujarLuna(context, lunaX, 30);
+        }
+        int fantasmaX = this.width - 52;
+        if (fantasmaX >= limite + 4) {
+            int fantasmaY = this.height - 70 + (int) Math.round(6 * Math.sin(t / 600.0));
+            dibujarSprite(context, SPRITE_FANTASMA, fantasmaX, fantasmaY, 3, ch -> switch (ch) {
+                case 'w' -> 0xCCFFFFFF;
+                case 'k' -> 0xFF000000;
+                default -> 0;
+            });
+        }
+
+        // Murciélagos cruzando la pantalla
+        for (int i = 0; i < 4; i++) {
+            double velocidad = 0.05 + i * 0.015; // px por ms
+            int recorrido = this.width + 60;
+            int x = (int) ((t * velocidad + i * 97) % recorrido) - 30;
+            int y = 30 + i * (this.height / 5) + (int) Math.round(14 * Math.sin(t / 400.0 + i * 1.7));
+            boolean alasArriba = ((t / 150) + i) % 2 == 0;
+            dibujarSprite(context, alasArriba ? SPRITE_MURCIELAGO_ARRIBA : SPRITE_MURCIELAGO_ABAJO, x, y, 2,
+                    ch -> ch == 'k' ? 0xFF000000 : 0);
+        }
+
+        dibujarCementerio(context);
+        dibujarNiebla(context, t);
+        dibujarBrasas(context, t);
+        dibujarOjos(context, t);
+    }
+
+    private static final String[] SPRITE_LAPIDA = {
+            "..ssssss..",
+            ".ssssssss.",
+            "ssssddssss",
+            "ssssddssss",
+            "ssdddddsss",
+            "ssssddssss",
+            "ssssddssss",
+            "ssssssssss",
+            "ssssssssss",
+            "ssssssssss",
+            "gggggggggg"
+    };
+
+    private static void dibujarHalo(DrawContext context, int cx, int cy, int radio) {
+        for (int r = radio; r > 0; r -= 3) {
+            for (int yy = -r; yy <= r; yy++) {
+                int ancho = (int) Math.sqrt(r * r - yy * yy);
+                context.fill(cx - ancho, cy + yy, cx + ancho, cy + yy + 1, 0x14FF8C00);
+            }
+        }
+    }
+
+    // Fila de calabazas y lápidas sobre el suelo, en el margen inferior.
+    private void dibujarCementerio(DrawContext context) {
+        context.fill(0, this.height - 3, this.width, this.height, 0xFF120818);
+        for (int i = 0, x = 10; x < this.width - 20; i++, x += 56) {
+            int y = this.height - 14;
+            if (i % 3 == 1) {
+                dibujarSprite(context, SPRITE_LAPIDA, x, y, 1, ch -> switch (ch) {
+                    case 's' -> 0xFF6E6E7A;
+                    case 'd' -> 0xFF3A3A44;
+                    case 'g' -> 0xFF2E6B28;
+                    default -> 0;
+                });
+            } else {
+                dibujarHalo(context, x + 6, y + 5, 12);
+                dibujarCalabaza(context, x, y, 1, i);
+            }
+        }
+    }
+
+    // Niebla baja que se desplaza lentamente.
+    private void dibujarNiebla(DrawContext context, long t) {
+        for (int i = 0; i < 4; i++) {
+            int ancho = 140 + i * 40;
+            int x = (int) ((t / (30 + i * 12)) % (this.width + ancho)) - ancho;
+            int y = this.height - 30 - i * 5;
+            int alfa = 0x18 + i * 4;
+            context.fillGradient(x, y, x + ancho, y + 14, 0x00FFFFFF, (alfa << 24) | 0xFFFFFF);
+        }
+        context.fillGradient(0, this.height - 22, this.width, this.height, 0x00B8A0FF, 0x40B8A0FF);
+    }
+
+    // Brasas / luciérnagas naranjas que suben flotando.
+    private void dibujarBrasas(DrawContext context, long t) {
+        int ancho = Math.max(1, this.width);
+        for (int i = 0; i < 28; i++) {
+            double vel = 0.012 + (i % 5) * 0.005;
+            int y = this.height - (int) ((t * vel + i * 41) % Math.max(1, this.height));
+            int x = (i * 67 + (int) Math.round(Math.sin(t / 900.0 + i) * 8)) % ancho;
+            if (x < 0) x += ancho;
+            int alfa = 80 + (int) (100 * (0.5 + 0.5 * Math.sin(t / 200.0 + i)));
+            int tam = (i % 3 == 0) ? 2 : 1;
+            context.fill(x, y, x + tam, y + tam, (alfa << 24) | (i % 2 == 0 ? 0xFF8C00 : 0xFFD24A));
+        }
+    }
+
+    // Ojos que parpadean en la oscuridad del margen izquierdo.
+    private void dibujarOjos(DrawContext context, long t) {
+        int[] colores = { 0xFFFF2020, 0xFFFFE04A, 0xFF55FF55, 0xFFFF2020 };
+        for (int i = 0; i < 4; i++) {
+            if (((t / 400) + i * 7) % 12 == 0) continue; // parpadeo
+            int y = (this.height / 5) * (i + 1);
+            context.fill(2, y, 4, y + 2, colores[i]);
+            context.fill(6, y, 8, y + 2, colores[i]);
+        }
+    }
 
     private enum Pestana { MUTES, BANEOS, SS, ANTICHEAT }
 
@@ -332,6 +702,14 @@ public class ModeracionScreen extends Screen {
     protected void init() {
         this.panelAncho = ANCHO_ETIQUETA + (ANCHO_BOTON * 3) + (ESPACIO * 4);
 
+        // Estrellas del cielo de Halloween (posiciones fijas para esta pantalla)
+        java.util.Random azar = new java.util.Random(31);
+        this.estrellas = new int[120];
+        for (int i = 0; i < estrellas.length; i += 2) {
+            estrellas[i] = azar.nextInt(Math.max(1, this.width));
+            estrellas[i + 1] = azar.nextInt(Math.max(1, this.height));
+        }
+
         // El panel principal se ancla arriba a la izquierda (no centrado).
         this.panelX = MARGEN_PANTALLA;
         this.panelTopY = MARGEN_PANTALLA;
@@ -356,16 +734,16 @@ public class ModeracionScreen extends Screen {
 
         int cuartoTab = (panelAncho - ESPACIO * 3) / 4;
         int ultimoTabAncho = panelAncho - cuartoTab * 3 - ESPACIO * 3;
-        this.tabMutesBtn = ButtonWidget.builder(Text.of("Mutes"), b -> cambiarPestana(Pestana.MUTES))
+        this.tabMutesBtn = BotonNaranja.builder(Text.of("Mutes"), b -> cambiarPestana(Pestana.MUTES))
                 .dimensions(panelX, tabsY, cuartoTab, ALTO)
                 .build();
-        this.tabBaneosBtn = ButtonWidget.builder(Text.of("Baneos"), b -> cambiarPestana(Pestana.BANEOS))
+        this.tabBaneosBtn = BotonNaranja.builder(Text.of("Baneos"), b -> cambiarPestana(Pestana.BANEOS))
                 .dimensions(panelX + cuartoTab + ESPACIO, tabsY, cuartoTab, ALTO)
                 .build();
-        this.tabSSBtn = ButtonWidget.builder(Text.of("SS"), b -> cambiarPestana(Pestana.SS))
+        this.tabSSBtn = BotonNaranja.builder(Text.of("SS"), b -> cambiarPestana(Pestana.SS))
                 .dimensions(panelX + (cuartoTab + ESPACIO) * 2, tabsY, cuartoTab, ALTO)
                 .build();
-        this.tabAntiCheatBtn = ButtonWidget.builder(Text.of("AntiCheat"), b -> cambiarPestana(Pestana.ANTICHEAT))
+        this.tabAntiCheatBtn = BotonNaranja.builder(Text.of("AntiCheat"), b -> cambiarPestana(Pestana.ANTICHEAT))
                 .dimensions(panelX + (cuartoTab + ESPACIO) * 3, tabsY, ultimoTabAncho, ALTO)
                 .build();
         this.addDrawableChild(tabMutesBtn);
@@ -399,12 +777,12 @@ public class ModeracionScreen extends Screen {
 
         int xBotonesUsuario = panelX + panelAncho - anchoBotonesUsuario;
 
-        this.historialBtn = ButtonWidget.builder(Text.of("Historial"), b -> ejecutarHistorial())
+        this.historialBtn = BotonNaranja.builder(Text.of("Historial"), b -> ejecutarHistorial())
                 .dimensions(xBotonesUsuario, usuarioY, anchoBotonUsuario, ALTO)
                 .build();
         this.addDrawableChild(historialBtn);
 
-        this.ssComandoBtn = ButtonWidget.builder(Text.of("SS"), b -> ejecutarSS())
+        this.ssComandoBtn = BotonNaranja.builder(Text.of("SS"), b -> ejecutarSS())
                 .dimensions(xBotonesUsuario + anchoBotonUsuario + ESPACIO, usuarioY, anchoBotonUsuario, ALTO)
                 .build();
         this.addDrawableChild(ssComandoBtn);
@@ -416,7 +794,7 @@ public class ModeracionScreen extends Screen {
         this.ssComandoBtn.visible = (pestanaActual != Pestana.ANTICHEAT);
 
         // "Logs" solo tiene sentido para baneos, así que solo se muestra en esa pestaña
-        this.logsBtn = ButtonWidget.builder(Text.of("Logs"), b -> ejecutarLogs())
+        this.logsBtn = BotonNaranja.builder(Text.of("Logs"), b -> ejecutarLogs())
                 .dimensions(xBotonesUsuario + (anchoBotonUsuario + ESPACIO) * 2, usuarioY, anchoBotonUsuario, ALTO)
                 .build();
         this.logsBtn.visible = (pestanaActual == Pestana.BANEOS);
@@ -438,29 +816,29 @@ public class ModeracionScreen extends Screen {
         this.paginacionY = filasY0 + filasPorPagina * (ALTO + ESPACIO) + ESPACIO;
         this.accionesY = paginacionY + ALTO + ESPACIO * 3;
 
-        this.anteriorBtn = ButtonWidget.builder(Text.of("◀"), b -> cambiarPagina(-1))
+        this.anteriorBtn = BotonNaranja.builder(Text.of("◀"), b -> cambiarPagina(-1))
                 .dimensions(panelX, paginacionY, 40, ALTO)
                 .build();
-        this.siguienteBtn = ButtonWidget.builder(Text.of("▶"), b -> cambiarPagina(1))
+        this.siguienteBtn = BotonNaranja.builder(Text.of("▶"), b -> cambiarPagina(1))
                 .dimensions(panelX + panelAncho - 40, paginacionY, 40, ALTO)
                 .build();
         this.addDrawableChild(anteriorBtn);
         this.addDrawableChild(siguienteBtn);
 
         int anchoCopiar = panelAncho - 90 - ESPACIO;
-        this.copiarBanBtn = ButtonWidget.builder(Text.of("Copiar Último Ban"), b -> copiarUltimoBan())
+        this.copiarBanBtn = BotonNaranja.builder(Text.of("Copiar Último Ban"), b -> copiarUltimoBan())
                 .dimensions(panelX, accionesY, anchoCopiar, ALTO)
                 .build();
         this.copiarBanBtn.visible = (pestanaActual == Pestana.BANEOS);
         this.addDrawableChild(copiarBanBtn);
 
-        this.copiarMuteBtn = ButtonWidget.builder(Text.of("Copiar Último Mute"), b -> copiarUltimoMute())
+        this.copiarMuteBtn = BotonNaranja.builder(Text.of("Copiar Último Mute"), b -> copiarUltimoMute())
                 .dimensions(panelX, accionesY, anchoCopiar, ALTO)
                 .build();
         this.copiarMuteBtn.visible = (pestanaActual == Pestana.MUTES);
         this.addDrawableChild(copiarMuteBtn);
 
-        ButtonWidget cerrarBtn = ButtonWidget.builder(Text.of("Cerrar"), b -> this.close())
+        ButtonWidget cerrarBtn = BotonNaranja.builder(Text.of("Cerrar"), b -> this.close())
                 .dimensions(panelX + panelAncho - 90, accionesY, 90, ALTO)
                 .build();
         this.addDrawableChild(cerrarBtn);
@@ -472,31 +850,31 @@ public class ModeracionScreen extends Screen {
         int anchoUtil = (panelAncho - ESPACIO * 4) / 5;
         int xUtil = panelX;
 
-        ButtonWidget vanishBtn = ButtonWidget.builder(Text.of("Vanish"), b -> enviar("vanish"))
+        ButtonWidget vanishBtn = BotonNaranja.builder(Text.of("Vanish"), b -> enviar("vanish"))
                 .dimensions(xUtil, utilidadesY, anchoUtil, ALTO)
                 .build();
         this.addDrawableChild(vanishBtn);
         xUtil += anchoUtil + ESPACIO;
 
-        ButtonWidget flyBtn = ButtonWidget.builder(Text.of("Fly"), b -> enviar("fly"))
+        ButtonWidget flyBtn = BotonNaranja.builder(Text.of("Fly"), b -> enviar("fly"))
                 .dimensions(xUtil, utilidadesY, anchoUtil, ALTO)
                 .build();
         this.addDrawableChild(flyBtn);
         xUtil += anchoUtil + ESPACIO;
 
-        ButtonWidget velSueloBtn = ButtonWidget.builder(Text.of("Vel. Suelo"), b -> enviar("flyspeed walk 10"))
+        ButtonWidget velSueloBtn = BotonNaranja.builder(Text.of("Vel. Suelo"), b -> enviar("flyspeed walk 10"))
                 .dimensions(xUtil, utilidadesY, anchoUtil, ALTO)
                 .build();
         this.addDrawableChild(velSueloBtn);
         xUtil += anchoUtil + ESPACIO;
 
-        ButtonWidget velVueloBtn = ButtonWidget.builder(Text.of("Vel. Vuelo"), b -> enviar("flyspeed fly 4"))
+        ButtonWidget velVueloBtn = BotonNaranja.builder(Text.of("Vel. Vuelo"), b -> enviar("flyspeed fly 4"))
                 .dimensions(xUtil, utilidadesY, anchoUtil, ALTO)
                 .build();
         this.addDrawableChild(velVueloBtn);
         xUtil += anchoUtil + ESPACIO;
 
-        ButtonWidget alertsBtn = ButtonWidget.builder(Text.of("Alertas"), b -> enviar("alerts"))
+        ButtonWidget alertsBtn = BotonNaranja.builder(Text.of("Alertas"), b -> enviar("alerts"))
                 .dimensions(xUtil, utilidadesY, anchoUtil, ALTO)
                 .build();
         this.addDrawableChild(alertsBtn);
@@ -506,7 +884,7 @@ public class ModeracionScreen extends Screen {
         // ---------- Mini chat de registro: cajita en la esquina inferior derecha ----------
         if (this.mostrarRegistro) {
             int anchoLimpiar = 50;
-            this.limpiarRegistroBtn = ButtonWidget.builder(Text.of("Limpiar"), b -> {
+            this.limpiarRegistroBtn = BotonNaranja.builder(Text.of("Limpiar"), b -> {
                         RegistroModeracion.limpiar();
                         registroCacheTamano = -1; // fuerza reconstrucción del caché
                         registroScroll = 0;
@@ -612,7 +990,7 @@ public class ModeracionScreen extends Screen {
                 MensajeSS item = MENSAJES_SS[i];
                 int fila = i - inicio;
                 int y = filasY0 + fila * (ALTO + ESPACIO);
-                ButtonWidget boton = ButtonWidget.builder(Text.of(item.etiqueta()), b -> ejecutarMensajeSS(item.texto()))
+                ButtonWidget boton = BotonNaranja.builder(Text.of(item.etiqueta()), b -> ejecutarMensajeSS(item.texto()))
                         .dimensions(panelX, y, panelAncho, ALTO)
                         .build();
                 this.addDrawableChild(boton);
@@ -632,7 +1010,7 @@ public class ModeracionScreen extends Screen {
                 final int nivelFinal = nivel; // copia final para poder usarla dentro de la lambda
                 int x = panelX + ANCHO_ETIQUETA + ESPACIO + (nivel - 1) * (ANCHO_BOTON + ESPACIO);
                 String etiqueta = "#" + nivel + " (" + motivo.tiempo(nivel) + ")";
-                ButtonWidget boton = ButtonWidget.builder(Text.of(etiqueta), b -> ejecutarAccion(motivo, nivelFinal))
+                ButtonWidget boton = BotonNaranja.builder(Text.of(etiqueta), b -> ejecutarAccion(motivo, nivelFinal))
                         .dimensions(x, y, ANCHO_BOTON, ALTO)
                         .build();
                 this.addDrawableChild(boton);
@@ -941,7 +1319,7 @@ public class ModeracionScreen extends Screen {
             int alto = separador ? 6 : 10;
             if (y + alto >= y0 && y <= y1) {
                 if (separador) {
-                    context.fill(panelX, y + 2, panelX + panelAncho, y + 3, COLOR_SEPARADOR);
+                    lineaSolida(context, panelX, panelX + panelAncho, y + 2, 1, 0x80FF8C00);
                 } else {
                     context.drawTextWithShadow(this.textRenderer, anticheatLineasCache.get(i), panelX, y, anticheatColoresCache.get(i));
                 }
@@ -963,11 +1341,10 @@ public class ModeracionScreen extends Screen {
     @Override
     public void render(DrawContext context, int mouseX, int mouseY, float delta) {
         this.renderBackground(context);
+        dibujarAmbienteHalloween(context);
 
         // Panel de fondo con borde, para separar visualmente del mundo detrás
         context.fill(panelX - PADDING_PANEL, panelTopY, panelX + panelAncho + PADDING_PANEL, panelBottomY, COLOR_FONDO_PANEL);
-        context.fill(panelX - PADDING_PANEL, panelTopY, panelX + panelAncho + PADDING_PANEL, panelTopY + 1, COLOR_BORDE_PANEL);
-        context.fill(panelX - PADDING_PANEL, panelBottomY - 1, panelX + panelAncho + PADDING_PANEL, panelBottomY, COLOR_BORDE_PANEL);
 
         // Franjas alternas detrás de las filas, para leerlas mejor
         int cantidadFondo = cantidadItemsActual();
@@ -983,19 +1360,43 @@ public class ModeracionScreen extends Screen {
         }
 
         // Separador antes de la fila de utilidades
-        context.fill(panelX, utilidadesLabelY - 2, panelX + panelAncho, utilidadesLabelY - 1, COLOR_SEPARADOR);
+        lineaSolida(context, panelX, panelX + panelAncho, utilidadesLabelY - 2, 1, 0x80FF8C00);
 
         // Mini chat de registro: cajita en la esquina, por encima de todo lo demás
         if (mostrarRegistro) {
             context.fill(registroX - 8, registroCajaTopY, registroX + registroAncho + 8, registroCajaBottomY, COLOR_FONDO_PANEL);
-            context.fill(registroX - 8, registroCajaTopY, registroX + registroAncho + 8, registroCajaTopY + 1, COLOR_BORDE_PANEL);
-            context.fill(registroX - 8, registroCajaBottomY - 1, registroX + registroAncho + 8, registroCajaBottomY, COLOR_BORDE_PANEL);
             context.fill(registroX - 8, registroCajaTopY, registroX + registroAncho + 8, registroCajaTopY + REGISTRO_TITULO_ALTO - 2, 0x22FFFFFF);
         }
 
+        // Telarañas en las esquinas (detrás de los botones)
+        dibujarTelarana(context, panelX - PADDING_PANEL + 1, panelTopY + 1, 1, 1, 24);
+        int esquinaDerecha = mostrarRegistro ? registroX + registroAncho + 8 : panelX + panelAncho + PADDING_PANEL;
+        dibujarTelarana(context, esquinaDerecha - 1, panelTopY + 1, -1, 1, 24);
+
         super.render(context, mouseX, mouseY, delta);
 
-        context.drawCenteredTextWithShadow(this.textRenderer, this.title, panelX + panelAncho / 2, tituloY - 10, COLOR_TITULO);
+        // Marcos arcoíris (se dibujan tras los widgets para que se vean completos)
+        marcoArcoiris(context, panelX - PADDING_PANEL, panelTopY, panelX + panelAncho + PADDING_PANEL, panelBottomY);
+        if (mostrarRegistro) {
+            marcoArcoiris(context, registroX - 8, registroCajaTopY, registroX + registroAncho + 8, registroCajaBottomY);
+            lineaSolida(context, registroX - 8, registroX + registroAncho + 8, registroCajaTopY + REGISTRO_TITULO_ALTO - 2, 1, 0x80FF8C00);
+        }
+
+        // Título con calabazas a los lados
+        Text tituloHalloween = Text.of("☠ " + this.title.getString() + " ☠");
+        int centroTitulo = panelX + panelAncho / 2;
+        int anchoTitulo = this.textRenderer.getWidth(tituloHalloween);
+        context.drawCenteredTextWithShadow(this.textRenderer, tituloHalloween, centroTitulo, tituloY - 10, COLOR_TITULO);
+        dibujarHalo(context, centroTitulo - anchoTitulo / 2 - 18 + 6, 9, 14);
+        dibujarHalo(context, centroTitulo + anchoTitulo / 2 + 6 + 6, 9, 14);
+        dibujarCalabaza(context, centroTitulo - anchoTitulo / 2 - 18, 4, 1, 0);
+        dibujarCalabaza(context, centroTitulo + anchoTitulo / 2 + 6, 4, 1, 1);
+
+        // Araña colgando del borde superior del menú
+        dibujarArana(context, panelX + panelAncho - 6);
+        if (mostrarRegistro) {
+            dibujarArana(context, registroX + 100);
+        }
 
         int cuartoTab = (panelAncho - ESPACIO * 3) / 4;
         int ultimoTabAncho = panelAncho - cuartoTab * 3 - ESPACIO * 3;
@@ -1008,7 +1409,7 @@ public class ModeracionScreen extends Screen {
             case SS -> { barraX = panelX + (cuartoTab + ESPACIO) * 2; barraAncho = cuartoTab; }
             default -> { barraX = panelX + (cuartoTab + ESPACIO) * 3; barraAncho = ultimoTabAncho; }
         }
-        context.fill(barraX, barraY, barraX + barraAncho, barraY + 2, COLOR_ACENTO);
+        lineaSolida(context, barraX, barraX + barraAncho, barraY, 2, COLOR_LINEA);
 
         if (pestanaActual == Pestana.SS) {
             context.drawTextWithShadow(this.textRenderer, Text.of("Mensajes SS"), panelX, filasY0 - 11, COLOR_SUAVE);
@@ -1031,7 +1432,7 @@ public class ModeracionScreen extends Screen {
             context.drawCenteredTextWithShadow(this.textRenderer, Text.of(texto), panelX + panelAncho / 2, paginacionY + 6, COLOR_SUAVE);
         }
 
-        context.drawCenteredTextWithShadow(this.textRenderer, Text.of("Utilidades"), panelX + panelAncho / 2, utilidadesLabelY - 9, COLOR_SUAVE);
+        context.drawCenteredTextWithShadow(this.textRenderer, Text.of("☠ Utilidades ☠"), panelX + panelAncho / 2, utilidadesLabelY - 9, COLOR_SUAVE);
 
         if (!this.mensaje.getString().isEmpty()) {
             context.drawCenteredTextWithShadow(this.textRenderer, this.mensaje, panelX + panelAncho / 2, mensajeY, COLOR_AVISO);
@@ -1044,7 +1445,7 @@ public class ModeracionScreen extends Screen {
 
     private void renderizarRegistro(DrawContext context) {
         int tituloY = registroCajaTopY + 4;
-        context.drawTextWithShadow(this.textRenderer, Text.of("Registro"), registroX, tituloY, COLOR_ACENTO);
+        context.drawTextWithShadow(this.textRenderer, Text.of("☠ Registro"), registroX, tituloY, COLOR_ACENTO);
 
         actualizarCacheRegistro();
 

@@ -24,12 +24,8 @@ public class Config {
     /** Si es true, añade "#1"/"#2"/"#3" al final del motivo enviado al comando. */
     public static final boolean INCLUIR_NIVEL_EN_MOTIVO = true;
 
-    /**
-     * Ya no se usa para transformar el motivo (se mantiene tal cual, con espacios,
-     * p. ej. "Hacks Claros #1"). Se deja declarada por si alguna otra parte del
-     * mod la consulta, pero formatearMotivo() no la aplica.
-     */
-    public static final boolean ESPACIOS_A_GUION_BAJO = false;
+    /** Si es true, cambia los espacios del motivo por "_" para que viaje como un solo argumento. */
+    public static final boolean ESPACIOS_A_GUION_BAJO = true;
 
     /** Si es true, el comando se envía directo al servidor al pulsar el botón. */
     public static final boolean ENVIAR_DIRECTO = true;
@@ -77,14 +73,14 @@ public class Config {
     };
 
     private static String formatearMotivo(Motivo motivo, int nivel) {
-        String nombre = motivo.nombre();
-        return INCLUIR_NIVEL_EN_MOTIVO ? nombre + " #" + nivel : nombre;
+        String nombre = ESPACIOS_A_GUION_BAJO ? motivo.nombre().replace(' ', '_') : motivo.nombre();
+        return INCLUIR_NIVEL_EN_MOTIVO ? nombre + "#" + nivel : nombre;
     }
 
     public static String comandoMute(String usuario, Motivo motivo, int nivel) {
         String razon = formatearMotivo(motivo, nivel);
         String tiempo = motivo.tiempo(nivel);
-        return "mute " + usuario + " " + razon + " " + tiempo;
+        return "ipmute " + usuario + " " + razon + " " + tiempo;
     }
 
     public static String comandoBan(String usuario, Motivo motivo, int nivel) {
