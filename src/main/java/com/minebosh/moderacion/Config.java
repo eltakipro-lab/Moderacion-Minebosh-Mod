@@ -29,10 +29,20 @@ public class Config {
     /** Si es true, el comando se envía directo al servidor al pulsar el botón. */
     public static final boolean ENVIAR_DIRECTO = true;
 
-    /** Candado desactivado: siempre devuelve true (se mantiene porque otras clases lo llaman). */
+    /** Candado de hardware desactivado: siempre devuelve true (se mantiene porque otras clases lo llaman). */
     public static boolean licenciaValida() {
         return true;
     }
+
+    // ------------------------------------------------------------------
+    // Clave de acceso al panel
+    // ------------------------------------------------------------------
+
+    /** Clave que se pide al abrir el panel. */
+    public static final String CLAVE = "67staffs";
+
+    /** Se pone en true al acertar la clave; se reinicia al cerrar Minecraft. */
+    public static boolean desbloqueado = false;
 
     // ------------------------------------------------------------------
     // Motivos de MUTE (pestaña "Mutes")
@@ -96,7 +106,4 @@ public class Config {
     /** Texto de 3 líneas para el botón "Copiar último": Nick / Razón / Tiempo. */
     public static String textoCopiable(String usuario, Motivo motivo, int nivel, String tiempo) {
         return "Nick: " + usuario
-                + "\nRazón: " + motivo.nombre() + " #" + nivel
-                + "\nTiempo: " + tiempo;
-    }
-}
+                + "\nRazón: " +
