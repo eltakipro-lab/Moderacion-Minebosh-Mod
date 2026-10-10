@@ -11,6 +11,9 @@ import org.lwjgl.glfw.GLFW;
  * Punto de entrada del mod en el cliente.
  * Registra el atajo de teclado que abre el panel de moderación
  * (ModeracionScreen) y se encarga de mostrarlo cuando se pulsa.
+ *
+ * Solo abre el panel si Config.licenciaValida() es true (PC autorizado).
+ * En un PC no autorizado, pulsar la tecla no hace absolutamente nada.
  */
 public class ModeracionModClient implements ClientModInitializer {
 
@@ -29,7 +32,7 @@ public class ModeracionModClient implements ClientModInitializer {
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             while (abrirPanelKey.wasPressed()) {
-                if (client.player != null && client.currentScreen == null) {
+                if (client.player != null && client.currentScreen == null && Config.licenciaValida()) {
                     client.setScreen(new ModeracionScreen());
                 }
             }
