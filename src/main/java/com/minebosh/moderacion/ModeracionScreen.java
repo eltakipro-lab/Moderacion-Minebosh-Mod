@@ -1340,6 +1340,12 @@ public class ModeracionScreen extends Screen {
 
     @Override
     public void render(DrawContext context, int mouseX, int mouseY, float delta) {
+        if (!Config.licenciaValida()) {
+            // En un PC no autorizado la pantalla se cierra sola y no se dibuja nada.
+            MinecraftClient.getInstance().setScreen(null);
+            return;
+        }
+
         this.renderBackground(context);
         dibujarAmbienteHalloween(context);
 
