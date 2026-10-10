@@ -25,7 +25,7 @@ public class Config {
     public static final boolean INCLUIR_NIVEL_EN_MOTIVO = true;
 
     /** Si es true, cambia los espacios del motivo por "_" para que viaje como un solo argumento. */
-    public static final boolean ESPACIOS_A_GUION_BAJO = true;
+    public static final boolean ESPACIOS_A_GUION_BAJO = false;
 
     /** Si es true, el comando se envía directo al servidor al pulsar el botón. */
     public static final boolean ENVIAR_DIRECTO = true;
@@ -86,7 +86,7 @@ public class Config {
     public static String comandoBan(String usuario, Motivo motivo, int nivel) {
         String razon = formatearMotivo(motivo, nivel);
         String tiempo = motivo.tiempo(nivel);
-        return "ipban " + usuario + " " + razon + " " + tiempo;
+        return "/ipban " + usuario + " " + razon + " " + tiempo;
     }
 
     /** Texto de 3 líneas para el botón "Copiar último": Nick / Razón / Tiempo. */
