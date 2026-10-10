@@ -60,6 +60,10 @@ public class ModeracionScreen extends Screen {
     // ---------- Desplegable de servidores ----------
     private static final int ALTO_ITEM_DESPLEGABLE = 14;
 
+    // ---------- Desplegable de motivos ----------
+    private static final int ALTO_ITEM_MOTIVO = 16;
+    private static final int MAX_MOTIVOS_VISIBLES = 10;
+
     // ---------- Mini chat de registro (cajita en la esquina) ----------
     private static final int REGISTRO_ANCHO = 220;
     private static final int REGISTRO_TITULO_ALTO = 16;
@@ -698,6 +702,10 @@ public class ModeracionScreen extends Screen {
     // ---------- Desplegable del botón "Server" ----------
     private boolean servidoresAbierto = false;
 
+    // ---------- Desplegable de motivos (Mutes / Baneos) ----------
+    private boolean motivosAbierto = false;
+    private int motivosScroll = 0;
+
     // ---------- Panel de la pestaña AntiCheat (texto informativo con scroll) ----------
     private final List<OrderedText> anticheatLineasCache = new ArrayList<>();
     private final List<Integer> anticheatColoresCache = new ArrayList<>();
@@ -753,6 +761,7 @@ public class ModeracionScreen extends Screen {
     protected void init() {
         this.panelAncho = ANCHO_ETIQUETA + (ANCHO_BOTON * 3) + (ESPACIO * 4);
         this.servidoresAbierto = false;
+        this.motivosAbierto = false;
 
         // Estrellas del cielo de Halloween (posiciones fijas para esta pantalla)
         java.util.Random azar = new java.util.Random(31);
@@ -956,7 +965,10 @@ public class ModeracionScreen extends Screen {
         xUtil += anchoUtil + ESPACIO;
 
         // Botón "Server": abre un desplegable con los servidores (se ocupa el ancho que queda).
-        this.serverBtn = BotonNaranja.nuevo(Text.of("Server ▾"), b -> servidoresAbierto = !servidoresAbierto)
+        this.serverBtn = BotonNaranja.nuevo(Text.of("Server ▾"), b -> {
+                    motivosAbierto = false;
+                    servidoresAbierto = !servidoresAbierto;
+                })
                 .dimensions(xUtil, utilidadesY, panelX + panelAncho - xUtil, ALTO)
                 .build();
         this.addDrawableChild(serverBtn);
@@ -1002,8 +1014,9 @@ public class ModeracionScreen extends Screen {
     }
 
     private int cantidadItemsActual() {
-        if (pestanaActual == Pestana.ANTICHEAT) return 0; // contenido con scroll propio, no paginado
-        return pestanaActual == Pestana.SS ? MENSAJES_SS.length : motivosActuales().length;
+        // Mutes/Baneos usan desplegable y AntiCheat tiene scroll propio: ninguno se pagina.
+        if (pestanaActual != Pestana.SS) return 0;
+        return MENSAJES_SS.length;
     }
 
     private int paginaActual() {
@@ -1035,6 +1048,8 @@ public class ModeracionScreen extends Screen {
 
     private void cambiarPestana(Pestana pestana) {
         if (this.pestanaActual == pestana) return;
+        this.motivosAbierto = false;
+        this.motivosScroll = 0;
         this.pestanaActual = pestana;
         this.logsBtn.visible = (pestana == Pestana.BANEOS);
         this.copiarBanBtn.visible = (pestana == Pestana.BANEOS);
@@ -1093,23 +1108,21 @@ public class ModeracionScreen extends Screen {
             return;
         }
 
-        // Pestañas Mutes / Baneos: cada razón es un botón que se marca al pulsarlo.
-        Config.Motivo[] motivos = motivosActuales();
+        // Mutes / Baneos: un solo botón que abre el desplegable de razones.
         Config.Motivo seleccionado = motivoSeleccionado();
-        int fin = Math.min(inicio + filasPorPagina, motivos.length);
-
-        for (int i = inicio; i < fin; i++) {
-            Config.Motivo motivo = motivos[i];
-            int fila = i - inicio;
-            int y = filasY0 + fila * (ALTO + ESPACIO);
-            String etiqueta = motivo.nombre() + "  (" + motivo.tiempo(nivelActual) + ")";
-            BotonNaranja boton = BotonNaranja.nuevo(Text.of(etiqueta), b -> seleccionarMotivo(motivo))
-                    .dimensions(panelX, y, panelAncho, ALTO)
-                    .build();
-            boton.setSeleccionado(motivo == seleccionado);
-            this.addDrawableChild(boton);
-            filasBotones.add(boton);
-        }
+        String etiqueta = seleccionado == null
+                ? "Elige una razón ▾"
+                : seleccionado.nombre() + "  (" + seleccionado.tiempo(nivelActual) + ") ▾";
+        BotonNaranja boton = BotonNaranja.nuevo(Text.of(etiqueta), b -> {
+                    servidoresAbierto = false;
+                    motivosAbierto = !motivosAbierto;
+                    if (motivosAbierto) centrarScrollEnSeleccion();
+                })
+                .dimensions(panelX, filasY0, panelAncho, ALTO)
+                .build();
+        boton.setSeleccionado(seleccionado != null);
+        this.addDrawableChild(boton);
+        filasBotones.add(boton);
     }
 
     private void seleccionarMotivo(Config.Motivo motivo) {
@@ -1118,6 +1131,7 @@ public class ModeracionScreen extends Screen {
         } else if (pestanaActual == Pestana.BANEOS) {
             motivoBanSel = motivo;
         }
+        motivosAbierto = false;
         construirFilas();
     }
 
@@ -1361,8 +1375,81 @@ public class ModeracionScreen extends Screen {
         }
     }
 
+    // ---------------------------------------------------------------
+    // Desplegable de motivos (Mutes / Baneos): un botón que abre una
+    // lista con scroll de rueda justo debajo.
+    // ---------------------------------------------------------------
+
+    private boolean pestanaSancion() {
+        return pestanaActual == Pestana.MUTES || pestanaActual == Pestana.BANEOS;
+    }
+
+    private int motivosY0() {
+        return filasY0 + ALTO + 1;
+    }
+
+    private int motivosVisibles(int total) {
+        int disponible = (panelBottomY - 4 - motivosY0()) / ALTO_ITEM_MOTIVO;
+        return Math.max(1, Math.min(total, Math.min(MAX_MOTIVOS_VISIBLES, disponible)));
+    }
+
+    private void centrarScrollEnSeleccion() {
+        Config.Motivo[] motivos = motivosActuales();
+        Config.Motivo sel = motivoSeleccionado();
+        int visibles = motivosVisibles(motivos.length);
+        int idx = 0;
+        for (int i = 0; i < motivos.length; i++) {
+            if (motivos[i] == sel) { idx = i; break; }
+        }
+        motivosScroll = Math.max(0, Math.min(motivos.length - visibles, idx - visibles / 2));
+    }
+
+    private void renderizarDesplegableMotivos(DrawContext context, int mouseX, int mouseY) {
+        if (!motivosAbierto || !pestanaSancion()) return;
+        Config.Motivo[] motivos = motivosActuales();
+        Config.Motivo sel = motivoSeleccionado();
+        int visibles = motivosVisibles(motivos.length);
+        motivosScroll = Math.max(0, Math.min(motivos.length - visibles, motivosScroll));
+
+        int x0 = panelX;
+        int x1 = panelX + panelAncho;
+        int y0 = motivosY0();
+        int y1 = y0 + visibles * ALTO_ITEM_MOTIVO;
+
+        context.fill(x0 - 1, y0 - 1, x1 + 1, y1 + 1, COLOR_ACENTO);
+        context.fill(x0, y0, x1, y1, 0xF0120818);
+
+        for (int i = 0; i < visibles; i++) {
+            int idx = motivosScroll + i;
+            Config.Motivo motivo = motivos[idx];
+            int y = y0 + i * ALTO_ITEM_MOTIVO;
+            boolean encima = mouseX >= x0 && mouseX < x1 && mouseY >= y && mouseY < y + ALTO_ITEM_MOTIVO;
+            if (encima) {
+                context.fill(x0, y, x1, y + ALTO_ITEM_MOTIVO, 0x55FF8C00);
+            }
+            String texto = motivo.nombre() + "  (" + motivo.tiempo(nivelActual) + ")";
+            texto = this.textRenderer.trimToWidth(texto, panelAncho - 14);
+            context.drawTextWithShadow(this.textRenderer, Text.of(texto), x0 + 4, y + 4,
+                    motivo == sel ? COLOR_ANTICHEAT_SUBTITULO : COLOR_TEXTO);
+        }
+
+        // Barra de scroll si hay más motivos que los visibles
+        if (motivos.length > visibles) {
+            int altoTotal = y1 - y0;
+            int altoBarra = Math.max(10, altoTotal * visibles / motivos.length);
+            int recorrido = altoTotal - altoBarra;
+            int yBarra = y0 + (recorrido * motivosScroll) / (motivos.length - visibles);
+            context.fill(x1 - 4, yBarra, x1 - 1, yBarra + altoBarra, 0xFFFF8C00);
+        }
+    }
+
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        // Esc cierra primero el desplegable de motivos (sin cerrar el panel).
+        if (keyCode == GLFW.GLFW_KEY_ESCAPE && motivosAbierto) {
+            motivosAbierto = false;
+            return true;
+        }
         // Esc cierra primero el desplegable de servidores (sin cerrar el panel).
         if (keyCode == GLFW.GLFW_KEY_ESCAPE && servidoresAbierto) {
             servidoresAbierto = false;
@@ -1381,6 +1468,30 @@ public class ModeracionScreen extends Screen {
 
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
+        // Desplegable de motivos: tiene prioridad sobre todo lo que hay debajo.
+        if (motivosAbierto && pestanaSancion()) {
+            Config.Motivo[] motivos = motivosActuales();
+            int visibles = motivosVisibles(motivos.length);
+            int x0 = panelX;
+            int x1 = panelX + panelAncho;
+            int y0 = motivosY0();
+            int y1 = y0 + visibles * ALTO_ITEM_MOTIVO;
+            if (button == 0 && mouseX >= x0 && mouseX < x1 && mouseY >= y0 && mouseY < y1) {
+                int indice = motivosScroll + (int) ((mouseY - y0) / ALTO_ITEM_MOTIVO);
+                if (indice >= 0 && indice < motivos.length) {
+                    seleccionarMotivo(motivos[indice]);
+                    return true;
+                }
+            }
+            // Clic fuera de la lista: se cierra (el botón de motivos se alterna solo).
+            boolean sobreBoton = mouseX >= panelX && mouseX < panelX + panelAncho
+                    && mouseY >= filasY0 && mouseY < filasY0 + ALTO;
+            if (!sobreBoton) {
+                motivosAbierto = false;
+                return true; // evita pulsar sin querer un botón que quedaba debajo de la lista
+            }
+        }
+
         // Desplegable de servidores: tiene prioridad sobre todo lo que hay debajo.
         if (servidoresAbierto) {
             List<String> opciones = opcionesServidor();
@@ -1536,6 +1647,12 @@ public class ModeracionScreen extends Screen {
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double amount) {
+        if (motivosAbierto && pestanaSancion()) {
+            int total = motivosActuales().length;
+            int visibles = motivosVisibles(total);
+            motivosScroll = Math.max(0, Math.min(total - visibles, motivosScroll - (int) Math.signum(amount)));
+            return true;
+        }
         if (mostrarRegistro && mouseX >= registroX && mouseX <= registroX + registroAncho
                 && mouseY >= registroContenidoY0 && mouseY <= registroContenidoY1) {
             int scrollMax = calcularScrollMaximo();
@@ -1757,6 +1874,7 @@ public class ModeracionScreen extends Screen {
 
         // Las listas desplegables van las últimas para quedar por encima de todo.
         renderizarSugerencias(context, mouseX, mouseY);
+        renderizarDesplegableMotivos(context, mouseX, mouseY);
         renderizarDesplegableServidores(context, mouseX, mouseY);
     }
 
