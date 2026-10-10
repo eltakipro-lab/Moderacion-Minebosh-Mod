@@ -15,6 +15,7 @@ import net.minecraft.text.Style;
 import net.minecraft.text.Text;
 import net.minecraft.util.Formatting;
 import net.minecraft.util.math.MathHelper;
+import org.lwjgl.glfw.GLFW;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -29,9 +30,18 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Locale;
 import java.util.Properties;
 
 public class ModeracionScreen extends Screen {
+
+    // ---------- Servidores del desplegable del botón "Server" ----------
+    // CAMBIA estos nombres por los de tus servidores (tal cual los acepta /server).
+    private static final String[] SERVIDORES = {
+            "lobby",
+            "survival",
+            "skyblock"
+    };
 
     // ---------- Layout ----------
     private static final int ANCHO_ETIQUETA = 190;
@@ -42,6 +52,13 @@ public class ModeracionScreen extends Screen {
     private static final int MARGEN_PANTALLA = 20;
     private static final int FILAS_MIN = 4;
     private static final int FILAS_MAX = 25;
+
+    // ---------- Autocompletado de nombres ----------
+    private static final int ALTO_SUGERENCIA = 12;
+    private static final int MAX_SUGERENCIAS = 6;
+
+    // ---------- Desplegable de servidores ----------
+    private static final int ALTO_ITEM_DESPLEGABLE = 14;
 
     // ---------- Mini chat de registro (cajita en la esquina) ----------
     private static final int REGISTRO_ANCHO = 220;
@@ -74,15 +91,24 @@ public class ModeracionScreen extends Screen {
     // Botón naranja con letras negras y contorno blanco.
     // Usa la misma cadena builder(...).dimensions(...).build() que el
     // ButtonWidget normal, así el resto del código no cambia.
+    // Puede marcarse como "seleccionado" (se pinta en verde).
     // ---------------------------------------------------------------
     private static final class BotonNaranja extends ButtonWidget {
         private static final int NARANJA = 0xFFFF8C00;
         private static final int NARANJA_HOVER = 0xFFFFB347;
         private static final int NARANJA_BORDE = 0xFFB35F00;
         private static final int NARANJA_INACTIVO = 0xFF9A7B4F;
+        private static final int VERDE = 0xFF55DD55;
+        private static final int VERDE_HOVER = 0xFF7CFF9E;
+
+        private boolean seleccionado = false;
 
         private BotonNaranja(int x, int y, int ancho, int alto, Text texto, ButtonWidget.PressAction accion) {
             super(x, y, ancho, alto, texto, accion, DEFAULT_NARRATION_SUPPLIER);
+        }
+
+        void setSeleccionado(boolean valor) {
+            this.seleccionado = valor;
         }
 
         static Constructor nuevo(Text texto, ButtonWidget.PressAction accion) {
@@ -119,8 +145,16 @@ public class ModeracionScreen extends Screen {
             int w = getWidth();
             int h = getHeight();
 
-            int fondo = !this.active ? NARANJA_INACTIVO : (this.isHovered() ? NARANJA_HOVER : NARANJA);
-            context.fill(x, y, x + w, y + h, NARANJA_BORDE);
+            int fondo;
+            if (!this.active) {
+                fondo = NARANJA_INACTIVO;
+            } else if (seleccionado) {
+                fondo = this.isHovered() ? VERDE_HOVER : VERDE;
+            } else {
+                fondo = this.isHovered() ? NARANJA_HOVER : NARANJA;
+            }
+            int borde = seleccionado ? 0xFFFFFFFF : NARANJA_BORDE;
+            context.fill(x, y, x + w, y + h, borde);
             context.fill(x + 1, y + 1, x + w - 1, y + h - 1, fondo);
             context.fill(x + 1, y + 1, x + w - 1, y + 2, 0x55FFFFFF); // pequeño brillo arriba
 
@@ -640,6 +674,11 @@ public class ModeracionScreen extends Screen {
     private String ultimoTextoBan = "";
     private Text mensaje = Text.empty();
 
+    // ---------- Selección de sanción (nivel + razón) ----------
+    private int nivelActual = 1;
+    private Config.Motivo motivoMuteSel = null;
+    private Config.Motivo motivoBanSel = null;
+
     private ButtonWidget tabMutesBtn;
     private ButtonWidget tabBaneosBtn;
     private ButtonWidget tabSSBtn;
@@ -652,6 +691,12 @@ public class ModeracionScreen extends Screen {
     private ButtonWidget limpiarRegistroBtn;
     private ButtonWidget historialBtn;
     private ButtonWidget ssComandoBtn;
+    private ButtonWidget nivelBtn;
+    private ButtonWidget ejecutarBtn;
+    private ButtonWidget serverBtn;
+
+    // ---------- Desplegable del botón "Server" ----------
+    private boolean servidoresAbierto = false;
 
     // ---------- Panel de la pestaña AntiCheat (texto informativo con scroll) ----------
     private final List<OrderedText> anticheatLineasCache = new ArrayList<>();
@@ -669,12 +714,18 @@ public class ModeracionScreen extends Screen {
     private int usuarioY;
     private int filasY0;
     private int paginacionY;
+    private int comandoY;
+    private int ejecutarY;
     private int accionesY;
     private int utilidadesLabelY;
     private int utilidadesY;
     private int mensajeY;
     private int panelTopY;
     private int panelBottomY;
+
+    // ---------- Lista de autocompletado de nombres ----------
+    private int sugerenciasY;
+    private int sugerenciasAncho;
 
     // ---------- Panel de registro (mini chat con logs + historial) ----------
     private boolean mostrarRegistro;
@@ -701,6 +752,7 @@ public class ModeracionScreen extends Screen {
     @Override
     protected void init() {
         this.panelAncho = ANCHO_ETIQUETA + (ANCHO_BOTON * 3) + (ESPACIO * 4);
+        this.servidoresAbierto = false;
 
         // Estrellas del cielo de Halloween (posiciones fijas para esta pantalla)
         java.util.Random azar = new java.util.Random(31);
@@ -766,14 +818,16 @@ public class ModeracionScreen extends Screen {
         this.campoUsuario.setText(ultimoUsuario);
         // Guarda lo escrito al instante, letra a letra, hasta que el usuario lo
         // vuelva a cambiar (no hace falta pulsar ningún botón para que persista).
+        // La sugerencia en gris (autocompletado) se actualiza en render().
         this.campoUsuario.setChangedListener(texto -> {
             this.ultimoUsuario = texto;
-            // Quita la sugerencia "Nombre del usuario" en cuanto se escribe algo,
-            // y la vuelve a mostrar si el campo se deja vacío otra vez.
-            this.campoUsuario.setSuggestion(texto.isEmpty() ? "Nombre del usuario" : "");
             guardarEstado();
         });
         this.addDrawableChild(campoUsuario);
+
+        // Lista de nombres que aparece debajo del campo mientras se escribe.
+        this.sugerenciasY = usuarioY + ALTO + 1;
+        this.sugerenciasAncho = campoUsuario.getWidth();
 
         int xBotonesUsuario = panelX + panelAncho - anchoBotonesUsuario;
 
@@ -802,19 +856,23 @@ public class ModeracionScreen extends Screen {
 
         this.filasY0 = usuarioY + ALTO + ESPACIO * 3;
 
-        // Reserva fija de la parte inferior (paginación, acciones, utilidades y aviso)
-        // para calcular cuántas filas de motivos caben usando TODO el alto disponible.
-        int reservaInferior = (ALTO + ESPACIO * 3)   // hasta accionesY
-                + (ALTO + ESPACIO * 3)               // hasta utilidadesLabelY
-                + 10                                  // hasta utilidadesY
-                + (ALTO + 14)                          // hasta mensajeY
-                + 12;                                  // hasta panelBottomY
+        // Reserva fija de la parte inferior (paginación, vista previa del comando,
+        // nivel/ejecutar, acciones, utilidades y aviso) para calcular cuántas filas
+        // de motivos caben usando TODO el alto disponible.
+        int reservaInferior = (ALTO + ESPACIO * 3)            // hasta el comando
+                + (ALTO + ESPACIO * 3 + 12)                   // comando + fila Nivel/Banear
+                + (ALTO + ESPACIO * 3)                        // hasta utilidadesLabelY
+                + 10                                          // hasta utilidadesY
+                + (ALTO + 14)                                 // hasta mensajeY
+                + 12;                                         // hasta panelBottomY
         int espacioParaFilas = panelBottomY - filasY0 - ESPACIO - reservaInferior;
         int filasCalculadas = espacioParaFilas / (ALTO + ESPACIO);
         this.filasPorPagina = Math.max(FILAS_MIN, Math.min(FILAS_MAX, filasCalculadas));
 
         this.paginacionY = filasY0 + filasPorPagina * (ALTO + ESPACIO) + ESPACIO;
-        this.accionesY = paginacionY + ALTO + ESPACIO * 3;
+        this.comandoY = paginacionY + ALTO + ESPACIO * 2;
+        this.ejecutarY = comandoY + 12 + ESPACIO;
+        this.accionesY = ejecutarY + ALTO + ESPACIO * 3;
 
         this.anteriorBtn = BotonNaranja.nuevo(Text.of("◀"), b -> cambiarPagina(-1))
                 .dimensions(panelX, paginacionY, 40, ALTO)
@@ -824,6 +882,23 @@ public class ModeracionScreen extends Screen {
                 .build();
         this.addDrawableChild(anteriorBtn);
         this.addDrawableChild(siguienteBtn);
+
+        // ---------- Fila de sanción: botón de nivel + botón Banear/Mutear ----------
+        int anchoNivel = 100;
+        boolean pestanaSancion = (pestanaActual == Pestana.MUTES || pestanaActual == Pestana.BANEOS);
+        this.nivelBtn = BotonNaranja.nuevo(Text.of("Nivel: #" + nivelActual), b -> cambiarNivel())
+                .dimensions(panelX, ejecutarY, anchoNivel, ALTO)
+                .build();
+        this.nivelBtn.visible = pestanaSancion;
+        this.addDrawableChild(nivelBtn);
+
+        this.ejecutarBtn = BotonNaranja.nuevo(
+                        Text.of(pestanaActual == Pestana.MUTES ? "Mutear" : "Banear"),
+                        b -> ejecutarSeleccion())
+                .dimensions(panelX + anchoNivel + ESPACIO, ejecutarY, panelAncho - anchoNivel - ESPACIO, ALTO)
+                .build();
+        this.ejecutarBtn.visible = pestanaSancion;
+        this.addDrawableChild(ejecutarBtn);
 
         int anchoCopiar = panelAncho - 90 - ESPACIO;
         this.copiarBanBtn = BotonNaranja.nuevo(Text.of("Copiar Último Ban"), b -> copiarUltimoBan())
@@ -847,7 +922,7 @@ public class ModeracionScreen extends Screen {
         this.utilidadesLabelY = accionesY + ALTO + ESPACIO * 3;
         this.utilidadesY = utilidadesLabelY + 10;
 
-        int anchoUtil = (panelAncho - ESPACIO * 4) / 5;
+        int anchoUtil = (panelAncho - ESPACIO * 5) / 6;
         int xUtil = panelX;
 
         ButtonWidget vanishBtn = BotonNaranja.nuevo(Text.of("Vanish"), b -> enviar("vanish"))
@@ -878,6 +953,13 @@ public class ModeracionScreen extends Screen {
                 .dimensions(xUtil, utilidadesY, anchoUtil, ALTO)
                 .build();
         this.addDrawableChild(alertsBtn);
+        xUtil += anchoUtil + ESPACIO;
+
+        // Botón "Server": abre un desplegable con los servidores (se ocupa el ancho que queda).
+        this.serverBtn = BotonNaranja.nuevo(Text.of("Server ▾"), b -> servidoresAbierto = !servidoresAbierto)
+                .dimensions(xUtil, utilidadesY, panelX + panelAncho - xUtil, ALTO)
+                .build();
+        this.addDrawableChild(serverBtn);
 
         this.mensajeY = utilidadesY + ALTO + 14;
 
@@ -909,6 +991,14 @@ public class ModeracionScreen extends Screen {
 
     private Config.Motivo[] motivosActuales() {
         return pestanaActual == Pestana.MUTES ? Config.MOTIVOS_MUTE : Config.MOTIVOS_BAN;
+    }
+
+    private Config.Motivo motivoSeleccionado() {
+        return switch (pestanaActual) {
+            case MUTES -> motivoMuteSel;
+            case BANEOS -> motivoBanSel;
+            default -> null;
+        };
     }
 
     private int cantidadItemsActual() {
@@ -952,6 +1042,10 @@ public class ModeracionScreen extends Screen {
         this.campoUsuario.visible = (pestana != Pestana.ANTICHEAT);
         this.historialBtn.visible = (pestana != Pestana.ANTICHEAT);
         this.ssComandoBtn.visible = (pestana != Pestana.ANTICHEAT);
+        boolean pestanaSancion = (pestana == Pestana.MUTES || pestana == Pestana.BANEOS);
+        this.nivelBtn.visible = pestanaSancion;
+        this.ejecutarBtn.visible = pestanaSancion;
+        this.ejecutarBtn.setMessage(Text.of(pestana == Pestana.MUTES ? "Mutear" : "Banear"));
         guardarEstado();
         construirFilas();
         actualizarPaginacion();
@@ -999,24 +1093,65 @@ public class ModeracionScreen extends Screen {
             return;
         }
 
+        // Pestañas Mutes / Baneos: cada razón es un botón que se marca al pulsarlo.
         Config.Motivo[] motivos = motivosActuales();
+        Config.Motivo seleccionado = motivoSeleccionado();
         int fin = Math.min(inicio + filasPorPagina, motivos.length);
 
         for (int i = inicio; i < fin; i++) {
             Config.Motivo motivo = motivos[i];
             int fila = i - inicio;
             int y = filasY0 + fila * (ALTO + ESPACIO);
-            for (int nivel = 1; nivel <= 3; nivel++) {
-                final int nivelFinal = nivel; // copia final para poder usarla dentro de la lambda
-                int x = panelX + ANCHO_ETIQUETA + ESPACIO + (nivel - 1) * (ANCHO_BOTON + ESPACIO);
-                String etiqueta = "#" + nivel + " (" + motivo.tiempo(nivel) + ")";
-                ButtonWidget boton = BotonNaranja.nuevo(Text.of(etiqueta), b -> ejecutarAccion(motivo, nivelFinal))
-                        .dimensions(x, y, ANCHO_BOTON, ALTO)
-                        .build();
-                this.addDrawableChild(boton);
-                filasBotones.add(boton);
-            }
+            String etiqueta = motivo.nombre() + "  (" + motivo.tiempo(nivelActual) + ")";
+            BotonNaranja boton = BotonNaranja.nuevo(Text.of(etiqueta), b -> seleccionarMotivo(motivo))
+                    .dimensions(panelX, y, panelAncho, ALTO)
+                    .build();
+            boton.setSeleccionado(motivo == seleccionado);
+            this.addDrawableChild(boton);
+            filasBotones.add(boton);
         }
+    }
+
+    private void seleccionarMotivo(Config.Motivo motivo) {
+        if (pestanaActual == Pestana.MUTES) {
+            motivoMuteSel = motivo;
+        } else if (pestanaActual == Pestana.BANEOS) {
+            motivoBanSel = motivo;
+        }
+        construirFilas();
+    }
+
+    private void cambiarNivel() {
+        nivelActual = (nivelActual % 3) + 1;
+        nivelBtn.setMessage(Text.of("Nivel: #" + nivelActual));
+        construirFilas();
+    }
+
+    // Texto del comando que se enviará con la selección actual (vista previa).
+    private String textoVistaPrevia() {
+        Config.Motivo motivo = motivoSeleccionado();
+        if (motivo == null) {
+            return "Elige una razón para ver el comando";
+        }
+        String usuario = this.campoUsuario.getText().trim();
+        if (usuario.isEmpty()) {
+            usuario = "<usuario>";
+        }
+        return pestanaActual == Pestana.MUTES
+                ? Config.comandoMute(usuario, motivo, nivelActual)
+                : Config.comandoBan(usuario, motivo, nivelActual);
+    }
+
+    // Botón Banear / Mutear: ejecuta el comando de la vista previa.
+    private void ejecutarSeleccion() {
+        Config.Motivo motivo = motivoSeleccionado();
+        if (motivo == null) {
+            avisar("Elige primero una razón.");
+            return;
+        }
+        if (usuarioActual() == null) return;
+        ejecutarAccion(motivo, nivelActual);
+        this.mensaje = Text.empty();
     }
 
     private void ejecutarAccion(Config.Motivo motivo, int nivel) {
@@ -1088,6 +1223,10 @@ public class ModeracionScreen extends Screen {
     }
 
     private void enviar(String comando) {
+        // El comando se envía sin la barra inicial (el juego ya sabe que es un comando).
+        if (comando.startsWith("/")) {
+            comando = comando.substring(1);
+        }
         registrarHistorial("Comando", "/" + comando);
         if (!Config.ENVIAR_DIRECTO) {
             MinecraftClient.getInstance().setScreen(new net.minecraft.client.gui.screen.ChatScreen("/" + comando));
@@ -1113,6 +1252,173 @@ public class ModeracionScreen extends Screen {
 
     private void avisar(String texto) {
         this.mensaje = Text.of(texto);
+    }
+
+    // ---------------------------------------------------------------
+    // Autocompletado de nombres: usa los jugadores conectados (lista de
+    // jugadores del servidor). Se completa con clic o con la tecla Tab.
+    // La lista sale justo DEBAJO del campo de usuario.
+    // ---------------------------------------------------------------
+
+    private List<String> coincidenciasNombres() {
+        List<String> resultado = new ArrayList<>();
+        if (this.campoUsuario == null) return resultado;
+        String texto = this.campoUsuario.getText();
+        if (texto.isEmpty()) return resultado;
+
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (client.getNetworkHandler() == null) return resultado;
+
+        String minuscula = texto.toLowerCase(Locale.ROOT);
+        for (var entrada : client.getNetworkHandler().getPlayerList()) {
+            String nombre = entrada.getProfile().getName();
+            if (nombre.toLowerCase(Locale.ROOT).startsWith(minuscula) && !nombre.equalsIgnoreCase(texto)) {
+                resultado.add(nombre);
+            }
+        }
+        resultado.sort(String.CASE_INSENSITIVE_ORDER);
+        return resultado;
+    }
+
+    // Texto gris que se ve dentro del campo: el resto del primer nombre que coincide.
+    private String sugerenciaInline(String texto) {
+        if (texto.isEmpty()) return "Nombre del usuario";
+        List<String> coincidencias = coincidenciasNombres();
+        if (!coincidencias.isEmpty()) {
+            return coincidencias.get(0).substring(texto.length());
+        }
+        return "";
+    }
+
+    private void renderizarSugerencias(DrawContext context, int mouseX, int mouseY) {
+        if (campoUsuario == null || !campoUsuario.visible || !campoUsuario.isFocused()) return;
+        List<String> sugerencias = coincidenciasNombres();
+        int n = Math.min(sugerencias.size(), MAX_SUGERENCIAS);
+        if (n == 0) return;
+
+        int x0 = panelX;
+        int x1 = panelX + sugerenciasAncho;
+        int y0 = sugerenciasY;
+        int y1 = sugerenciasY + n * ALTO_SUGERENCIA;
+
+        context.fill(x0 - 1, y0 - 1, x1 + 1, y1 + 1, COLOR_ACENTO);
+        context.fill(x0, y0, x1, y1, 0xF0120818);
+        for (int i = 0; i < n; i++) {
+            int y = y0 + i * ALTO_SUGERENCIA;
+            boolean encima = mouseX >= x0 && mouseX < x1 && mouseY >= y && mouseY < y + ALTO_SUGERENCIA;
+            if (encima) {
+                context.fill(x0, y, x1, y + ALTO_SUGERENCIA, 0x55FF8C00);
+            }
+            context.drawTextWithShadow(this.textRenderer, Text.of(sugerencias.get(i)), x0 + 4, y + 2,
+                    i == 0 ? COLOR_ANTICHEAT_SUBTITULO : COLOR_TEXTO);
+        }
+    }
+
+    // ---------------------------------------------------------------
+    // Desplegable del botón "Server": primera opción "Ver lista" (/server)
+    // y después un /server <nombre> por cada servidor de SERVIDORES.
+    // Se abre hacia arriba (el botón está al final del panel); si no cupiera
+    // arriba, se abre hacia abajo.
+    // ---------------------------------------------------------------
+
+    private List<String> opcionesServidor() {
+        List<String> opciones = new ArrayList<>();
+        opciones.add("Ver lista");
+        for (String servidor : SERVIDORES) {
+            opciones.add(servidor);
+        }
+        return opciones;
+    }
+
+    private int servidoresAncho() {
+        return Math.max(serverBtn.getWidth(), 110);
+    }
+
+    private int servidoresY0(int cantidad) {
+        int alto = cantidad * ALTO_ITEM_DESPLEGABLE;
+        int arriba = utilidadesY - 2 - alto;
+        return arriba >= 4 ? arriba : utilidadesY + ALTO + 2;
+    }
+
+    private void renderizarDesplegableServidores(DrawContext context, int mouseX, int mouseY) {
+        if (!servidoresAbierto) return;
+        List<String> opciones = opcionesServidor();
+        int x1 = panelX + panelAncho;
+        int x0 = x1 - servidoresAncho();
+        int y0 = servidoresY0(opciones.size());
+        int y1 = y0 + opciones.size() * ALTO_ITEM_DESPLEGABLE;
+
+        context.fill(x0 - 1, y0 - 1, x1 + 1, y1 + 1, COLOR_ACENTO);
+        context.fill(x0, y0, x1, y1, 0xF0120818);
+        for (int i = 0; i < opciones.size(); i++) {
+            int y = y0 + i * ALTO_ITEM_DESPLEGABLE;
+            boolean encima = mouseX >= x0 && mouseX < x1 && mouseY >= y && mouseY < y + ALTO_ITEM_DESPLEGABLE;
+            if (encima) {
+                context.fill(x0, y, x1, y + ALTO_ITEM_DESPLEGABLE, 0x55FF8C00);
+            }
+            context.drawTextWithShadow(this.textRenderer, Text.of(opciones.get(i)), x0 + 4, y + 3,
+                    i == 0 ? COLOR_ANTICHEAT_SUBTITULO : COLOR_TEXTO);
+        }
+    }
+
+    @Override
+    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        // Esc cierra primero el desplegable de servidores (sin cerrar el panel).
+        if (keyCode == GLFW.GLFW_KEY_ESCAPE && servidoresAbierto) {
+            servidoresAbierto = false;
+            return true;
+        }
+        // Tab completa el nombre con la primera coincidencia.
+        if (keyCode == GLFW.GLFW_KEY_TAB && campoUsuario != null && campoUsuario.visible && campoUsuario.isFocused()) {
+            List<String> coincidencias = coincidenciasNombres();
+            if (!coincidencias.isEmpty()) {
+                campoUsuario.setText(coincidencias.get(0));
+                return true;
+            }
+        }
+        return super.keyPressed(keyCode, scanCode, modifiers);
+    }
+
+    @Override
+    public boolean mouseClicked(double mouseX, double mouseY, int button) {
+        // Desplegable de servidores: tiene prioridad sobre todo lo que hay debajo.
+        if (servidoresAbierto) {
+            List<String> opciones = opcionesServidor();
+            int x1 = panelX + panelAncho;
+            int x0 = x1 - servidoresAncho();
+            int y0 = servidoresY0(opciones.size());
+            if (button == 0 && mouseX >= x0 && mouseX < x1 && mouseY >= y0) {
+                int indice = (int) ((mouseY - y0) / ALTO_ITEM_DESPLEGABLE);
+                if (indice >= 0 && indice < opciones.size()) {
+                    servidoresAbierto = false;
+                    if (indice == 0) {
+                        enviar("server");
+                    } else {
+                        enviar("server " + opciones.get(indice));
+                    }
+                    return true;
+                }
+            }
+            // Clic fuera de la lista: se cierra (el propio botón "Server" lo alterna él solo).
+            if (!serverBtn.isMouseOver(mouseX, mouseY)) {
+                servidoresAbierto = false;
+            }
+        }
+
+        // Clic sobre un nombre de la lista de autocompletado.
+        if (button == 0 && campoUsuario != null && campoUsuario.visible && campoUsuario.isFocused()) {
+            List<String> sugerencias = coincidenciasNombres();
+            int n = Math.min(sugerencias.size(), MAX_SUGERENCIAS);
+            for (int i = 0; i < n; i++) {
+                int y = sugerenciasY + i * ALTO_SUGERENCIA;
+                if (mouseX >= panelX && mouseX < panelX + sugerenciasAncho
+                        && mouseY >= y && mouseY < y + ALTO_SUGERENCIA) {
+                    campoUsuario.setText(sugerencias.get(i));
+                    return true;
+                }
+            }
+        }
+        return super.mouseClicked(mouseX, mouseY, button);
     }
 
     // ---------------------------------------------------------------
@@ -1349,6 +1655,11 @@ public class ModeracionScreen extends Screen {
         this.renderBackground(context);
         dibujarAmbienteHalloween(context);
 
+        // Texto gris de autocompletado dentro del campo de usuario
+        if (campoUsuario.visible) {
+            campoUsuario.setSuggestion(sugerenciaInline(campoUsuario.getText()));
+        }
+
         // Panel de fondo con borde, para separar visualmente del mundo detrás
         context.fill(panelX - PADDING_PANEL, panelTopY, panelX + panelAncho + PADDING_PANEL, panelBottomY, COLOR_FONDO_PANEL);
 
@@ -1422,15 +1733,11 @@ public class ModeracionScreen extends Screen {
         } else if (pestanaActual == Pestana.ANTICHEAT) {
             renderizarAntiCheat(context);
         } else {
-            Config.Motivo[] motivos = motivosActuales();
-            int pagina = paginaActual();
-            int inicio = pagina * filasPorPagina;
-            int fin = Math.min(inicio + filasPorPagina, motivos.length);
-            for (int i = inicio; i < fin; i++) {
-                int fila = i - inicio;
-                int y = filasY0 + fila * (ALTO + ESPACIO) + (ALTO - 8) / 2;
-                context.drawTextWithShadow(this.textRenderer, Text.of(motivos[i].nombre()), panelX, y, COLOR_TEXTO);
-            }
+            // Vista previa del comando que se enviará (Mutes / Baneos)
+            Config.Motivo motivoSel = motivoSeleccionado();
+            String vista = this.textRenderer.trimToWidth(textoVistaPrevia(), panelAncho);
+            context.drawCenteredTextWithShadow(this.textRenderer, Text.of(vista), panelX + panelAncho / 2, comandoY + 2,
+                    motivoSel == null ? COLOR_SUAVE : COLOR_ANTICHEAT_SUBTITULO);
         }
 
         if (totalPaginas() > 1) {
@@ -1447,6 +1754,10 @@ public class ModeracionScreen extends Screen {
         if (mostrarRegistro) {
             renderizarRegistro(context);
         }
+
+        // Las listas desplegables van las últimas para quedar por encima de todo.
+        renderizarSugerencias(context, mouseX, mouseY);
+        renderizarDesplegableServidores(context, mouseX, mouseY);
     }
 
     private void renderizarRegistro(DrawContext context) {
