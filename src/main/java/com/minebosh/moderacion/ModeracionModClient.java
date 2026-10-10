@@ -9,8 +9,9 @@ import org.lwjgl.glfw.GLFW;
 
 /**
  * Punto de entrada del mod en el cliente.
- * Registra el atajo de teclado que abre el panel de moderación
- * (ModeracionScreen) y se encarga de mostrarlo cuando se pulsa.
+ * Registra el atajo de teclado que abre el panel de moderación.
+ * La primera vez que se pulsa en cada sesión pide la clave (ClaveScreen);
+ * una vez acertada, abre directamente el panel (ModeracionScreen).
  */
 public class ModeracionModClient implements ClientModInitializer {
 
@@ -30,7 +31,11 @@ public class ModeracionModClient implements ClientModInitializer {
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             while (abrirPanelKey.wasPressed()) {
                 if (client.player != null && client.currentScreen == null) {
-                    client.setScreen(new ModeracionScreen());
+                    if (Config.desbloqueado) {
+                        client.setScreen(new ModeracionScreen());
+                    } else {
+                        client.setScreen(new ClaveScreen());
+                    }
                 }
             }
         });
