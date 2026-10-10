@@ -106,4 +106,7 @@ public class Config {
     /** Texto de 3 líneas para el botón "Copiar último": Nick / Razón / Tiempo. */
     public static String textoCopiable(String usuario, Motivo motivo, int nivel, String tiempo) {
         return "Nick: " + usuario
-                + "\nRazón: " +
+                + "\nRazón: " + motivo.nombre() + " #" + nivel
+                + "\nTiempo: " + tiempo;
+    }
+}
