@@ -5,6 +5,8 @@ import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
 import net.minecraft.client.option.KeyBinding;
 import net.minecraft.client.util.InputUtil;
+import net.minecraft.text.Text;
+import net.minecraft.util.Formatting;
 import org.lwjgl.glfw.GLFW;
 
 /**
@@ -13,7 +15,7 @@ import org.lwjgl.glfw.GLFW;
  * (ModeracionScreen) y se encarga de mostrarlo cuando se pulsa.
  *
  * Solo abre el panel si Config.licenciaValida() es true (PC autorizado).
- * En un PC no autorizado, pulsar la tecla no hace absolutamente nada.
+ * En un PC no autorizado no se abre la interfaz: solo sale un mensaje en el chat.
  */
 public class ModeracionModClient implements ClientModInitializer {
 
@@ -32,8 +34,17 @@ public class ModeracionModClient implements ClientModInitializer {
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             while (abrirPanelKey.wasPressed()) {
-                if (client.player != null && client.currentScreen == null && Config.licenciaValida()) {
+                if (client.player == null || client.currentScreen != null) {
+                    continue;
+                }
+
+                if (Config.licenciaValida()) {
                     client.setScreen(new ModeracionScreen());
+                } else {
+                    client.player.sendMessage(
+                            Text.literal("No mires Mods de otros Chismoso.").formatted(Formatting.RED),
+                            false
+                    );
                 }
             }
         });
