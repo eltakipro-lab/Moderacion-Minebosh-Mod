@@ -49,7 +49,7 @@ public class Config {
     private static final String SAL = "minebosh-moderacion-2026";
 
     /** PEGA AQUÍ el hash que te imprima LicenciaUtilidad en tu PC. */
-    private static final String LICENCIA_HASH_AUTORIZADO = "PEGA_AQUI_TU_HASH_DE_64_CARACTERES";
+    private static final String LICENCIA_HASH_AUTORIZADO = "87781c165df816e05094326bda031a1f8372807112880cf0cfd8361579c5fc23";
 
     private static Boolean licenciaCacheada = null;
 
