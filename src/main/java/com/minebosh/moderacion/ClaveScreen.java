@@ -39,7 +39,7 @@ public class ClaveScreen extends Screen {
     }
 
     private void comprobar() {
-        if (Config.CLAVE.equals(campo.getText())) {
+        if (Config.claveCorrecta(campo.getText())) {
             Config.desbloqueado = true;
             this.client.setScreen(new ModeracionScreen());
         } else {
