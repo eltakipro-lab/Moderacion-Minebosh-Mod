@@ -1,5 +1,10 @@
 package com.minebosh.moderacion;
 
+import javax.crypto.SecretKeyFactory;
+import javax.crypto.spec.PBEKeySpec;
+import java.security.MessageDigest;
+import java.util.HexFormat;
+
 public class Config {
 
     /**
@@ -35,11 +40,29 @@ public class Config {
     }
 
     // ------------------------------------------------------------------
-    // Clave de acceso al panel
+    // Clave de acceso al panel (guardada como hash, nunca en texto plano)
     // ------------------------------------------------------------------
 
-    /** Clave que se pide al abrir el panel. */
-    public static final String CLAVE = "67staffs";
+    private static final String CLAVE_SAL  = "a92f07e91184d2adb444bb94bbf5cf18";
+    private static final String CLAVE_HASH = "9c66eed9ae55466d19b5ef09a06bbebc91ad67e06d87e93872278c6f06217f68";
+    private static final int CLAVE_ITERACIONES = 200_000;
+
+    /** Comprueba la clave escrita comparando su hash PBKDF2-SHA256 con el guardado. */
+    public static boolean claveCorrecta(String intento) {
+        if (intento == null) {
+            return false;
+        }
+        try {
+            byte[] sal = HexFormat.of().parseHex(CLAVE_SAL);
+            PBEKeySpec spec = new PBEKeySpec(intento.toCharArray(), sal, CLAVE_ITERACIONES, 256);
+            byte[] hash = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
+                    .generateSecret(spec)
+                    .getEncoded();
+            return MessageDigest.isEqual(hash, HexFormat.of().parseHex(CLAVE_HASH));
+        } catch (Exception e) {
+            return false;
+        }
+    }
 
     /** Se pone en true al acertar la clave; se reinicia al cerrar Minecraft. */
     public static boolean desbloqueado = false;
