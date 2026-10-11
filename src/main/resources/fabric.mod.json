@@ -2,13 +2,14 @@
   "schemaVersion": 1,
   "id": "moderacion-minebosh-tabs",
   "version": "${version}",
-  "name": "Utilidades",
-  "description": "Utilidades del cliente.",
+  "name": "LambDynamicLights - Dynamic Lights",
+  "description": "Dynamic lights.",
   "authors": [
     "Utilidades"
   ],
   "contact": {},
   "license": "MIT",
+  "icon": "assets/moderacion-minebosh-tabs/icon.png",
   "environment": "client",
   "entrypoints": {
     "client": [
