@@ -1,4 +1,4 @@
-package TU.PAQUETE;
+package com.minebosh.moderacion;
 
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
@@ -50,7 +50,7 @@ public class ClaveScreen extends Screen {
         Config.Nivel nivel = Config.nivelPara(campo.getText());
         if (nivel != Config.Nivel.NINGUNO) {
             fallos = 0;
-            client.setScreen(new PanelScreen(nivel));
+            client.setScreen(new ModeracionScreen(nivel));
             return;
         }
 
@@ -87,7 +87,6 @@ public class ClaveScreen extends Screen {
     @Override
     public void render(DrawContext context, int mouseX, int mouseY, float delta) {
         context.fill(0, 0, width, height, 0xFF0B0B0B);
-        // marco naranja
         context.fill(20, 20, width - 20, 22, NARANJA);
         context.fill(20, height - 22, width - 20, height - 20, NARANJA);
         context.fill(20, 20, 22, height - 20, NARANJA);
