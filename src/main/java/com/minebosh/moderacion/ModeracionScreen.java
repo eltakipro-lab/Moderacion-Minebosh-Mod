@@ -1,1916 +1,242 @@
 package com.minebosh.moderacion;
 
-import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;
-import net.fabricmc.fabric.api.client.message.v1.ClientSendMessageEvents;
-import net.fabricmc.loader.api.FabricLoader;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.font.TextRenderer;
+import java.util.ArrayList;
+import java.util.List;
+
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.client.gui.widget.TextFieldWidget;
-import net.minecraft.text.MutableText;
-import net.minecraft.text.OrderedText;
-import net.minecraft.text.Style;
+import net.minecraft.client.network.PlayerListEntry;
 import net.minecraft.text.Text;
-import net.minecraft.util.Formatting;
-import net.minecraft.util.math.MathHelper;
-import org.lwjgl.glfw.GLFW;
-
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.StandardOpenOption;
-import java.time.LocalDateTime;
-import java.time.LocalTime;
-import java.time.format.DateTimeFormatter;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-import java.util.Locale;
-import java.util.Properties;
 
 public class ModeracionScreen extends Screen {
 
-    // ---------- Servidores del desplegable del botón "Server" ----------
-    // CAMBIA estos nombres por los de tus servidores (tal cual los acepta /server).
-    private static final String[] SERVIDORES = {
-            "lobby",
-            "survival",
-            "skyblock"
+    // ===== EDITA AQUI =====
+    // {motivo, tiempo #1, tiempo #2, tiempo #3}
+    private static final String[][] MOTIVOS_MUTE = {
+            {"Lenguaje Ofensivo", "2h", "6h", "1d"},
+            {"Flood", "30m", "1h", "2h"},
+            {"Insultos Al Servidor", "8h", "16h", "1d"},
+            {"Falta de Respeto al Staff", "4h", "12h", "1d"},
+            {"Nombrar servidores Externos", "30m", "1h", "2h"},
+            {"Tradeos Externos", "2h", "6h", "15h"}
     };
-
-    // ---------- Layout ----------
-    private static final int ANCHO_ETIQUETA = 190;
-    private static final int ANCHO_BOTON = 64;
-    private static final int ALTO = 20;
-    private static final int ESPACIO = 4;
-    private static final int PADDING_PANEL = 12;
-    private static final int MARGEN_PANTALLA = 20;
-    private static final int FILAS_MIN = 4;
-    private static final int FILAS_MAX = 25;
-
-    // ---------- Autocompletado de nombres ----------
-    private static final int ALTO_SUGERENCIA = 12;
-    private static final int MAX_SUGERENCIAS = 6;
-
-    // ---------- Desplegable de servidores ----------
-    private static final int ALTO_ITEM_DESPLEGABLE = 14;
-
-    // ---------- Desplegable de motivos ----------
-    private static final int ALTO_ITEM_MOTIVO = 16;
-    private static final int MAX_MOTIVOS_VISIBLES = 10;
-
-    // ---------- Mini chat de registro (cajita en la esquina) ----------
-    private static final int REGISTRO_ANCHO = 220;
-    private static final int REGISTRO_TITULO_ALTO = 16;
-
-    // ---------- Colores ----------
-    private static final int COLOR_TITULO = 0xFFA500;
-    private static final int COLOR_ACENTO = 0xFFFF8C00;
-    private static final int COLOR_ANTICHEAT_SUBTITULO = 0x55FF55;
-    private static final int COLOR_TEXTO = 0xFFFFFF;
-    private static final int COLOR_SUAVE = 0xAAAAAA;
-    private static final int COLOR_AVISO = 0xFFFF55;
-    private static final int COLOR_FONDO_PANEL = 0xD01C0A2A;
-    private static final int COLOR_FILA_PAR = 0x20FF8C00;
-    private static final int COLOR_SEPARADOR = 0x40FFFFFF;
-    private static final int COLOR_REGISTRO_ACCION = 0xFF7CFF9E;
-    private static final int COLOR_REGISTRO_RESPUESTA = 0xFFA0C8FF;
-    private static final int COLOR_SANCION_BAN = 0xFF55FF55;
-    private static final int COLOR_REGISTRO_HORA = 0xFF808080;
-    private static final int COLOR_LINEA = 0xFFFF8C00;
-
-    // ---------- Guardado en disco ----------
-    private static final Path ARCHIVO_ESTADO = FabricLoader.getInstance().getConfigDir()
-            .resolve("moderacion-minebosh-tabs.properties");
-    private static final Path ARCHIVO_HISTORIAL = FabricLoader.getInstance().getConfigDir()
-            .resolve("moderacion-minebosh-tabs-historial.log");
-    private static final DateTimeFormatter FORMATO_FECHA = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
-
-    // ---------------------------------------------------------------
-    // Botón naranja con letras negras y contorno blanco.
-    // Usa la misma cadena builder(...).dimensions(...).build() que el
-    // ButtonWidget normal, así el resto del código no cambia.
-    // Puede marcarse como "seleccionado" (se pinta en verde).
-    // ---------------------------------------------------------------
-    private static final class BotonNaranja extends ButtonWidget {
-        private static final int NARANJA = 0xFFFF8C00;
-        private static final int NARANJA_HOVER = 0xFFFFB347;
-        private static final int NARANJA_BORDE = 0xFFB35F00;
-        private static final int NARANJA_INACTIVO = 0xFF9A7B4F;
-        private static final int VERDE = 0xFF55DD55;
-        private static final int VERDE_HOVER = 0xFF7CFF9E;
-
-        private boolean seleccionado = false;
-
-        private BotonNaranja(int x, int y, int ancho, int alto, Text texto, ButtonWidget.PressAction accion) {
-            super(x, y, ancho, alto, texto, accion, DEFAULT_NARRATION_SUPPLIER);
-        }
-
-        void setSeleccionado(boolean valor) {
-            this.seleccionado = valor;
-        }
-
-        static Constructor nuevo(Text texto, ButtonWidget.PressAction accion) {
-            return new Constructor(texto, accion);
-        }
-
-        static final class Constructor {
-            private final Text texto;
-            private final ButtonWidget.PressAction accion;
-            private int x, y, ancho = 150, alto = 20;
-
-            private Constructor(Text texto, ButtonWidget.PressAction accion) {
-                this.texto = texto;
-                this.accion = accion;
-            }
-
-            Constructor dimensions(int x, int y, int ancho, int alto) {
-                this.x = x;
-                this.y = y;
-                this.ancho = ancho;
-                this.alto = alto;
-                return this;
-            }
-
-            BotonNaranja build() {
-                return new BotonNaranja(x, y, ancho, alto, texto, accion);
-            }
-        }
-
-        @Override
-        public void renderButton(DrawContext context, int mouseX, int mouseY, float delta) {
-            int x = getX();
-            int y = getY();
-            int w = getWidth();
-            int h = getHeight();
-
-            int fondo;
-            if (!this.active) {
-                fondo = NARANJA_INACTIVO;
-            } else if (seleccionado) {
-                fondo = this.isHovered() ? VERDE_HOVER : VERDE;
-            } else {
-                fondo = this.isHovered() ? NARANJA_HOVER : NARANJA;
-            }
-            int borde = seleccionado ? 0xFFFFFFFF : NARANJA_BORDE;
-            context.fill(x, y, x + w, y + h, borde);
-            context.fill(x + 1, y + 1, x + w - 1, y + h - 1, fondo);
-            context.fill(x + 1, y + 1, x + w - 1, y + 2, 0x55FFFFFF); // pequeño brillo arriba
-
-            TextRenderer tr = MinecraftClient.getInstance().textRenderer;
-            OrderedText texto = this.getMessage().asOrderedText();
-            int anchoTexto = tr.getWidth(texto);
-
-            // Si el texto es más ancho que el botón se reduce para que quepa entero.
-            float escala = anchoTexto > w - 6 ? (w - 6) / (float) anchoTexto : 1f;
-            float anchoFinal = anchoTexto * escala;
-            float tx = x + (w - anchoFinal) / 2f;
-            float ty = y + (h - 8 * escala) / 2f;
-
-            context.getMatrices().push();
-            context.getMatrices().translate(tx, ty, 0);
-            context.getMatrices().scale(escala, escala, 1f);
-
-            // Contorno blanco: el texto blanco desplazado 1px en las 8 direcciones...
-            for (int dx = -1; dx <= 1; dx++) {
-                for (int dy = -1; dy <= 1; dy++) {
-                    if (dx == 0 && dy == 0) continue;
-                    context.drawText(tr, texto, dx, dy, 0xFFFFFFFF, false);
-                }
-            }
-            // ...y encima el texto negro.
-            context.drawText(tr, texto, 0, 0, 0xFF000000, false);
-
-            context.getMatrices().pop();
-        }
-    }
-
-    // ---------------------------------------------------------------
-    // Líneas arcoíris animadas: el color recorre todo el espectro con
-    // el tiempo y además varía a lo largo de la propia línea.
-    // ---------------------------------------------------------------
-    private static int arcoiris(float desplazamiento) {
-        float fase = (System.currentTimeMillis() % 4000L) / 4000f;
-        float matiz = (fase + desplazamiento) % 1f;
-        if (matiz < 0) matiz += 1f;
-        return 0xFF000000 | MathHelper.hsvToRgb(matiz, 0.85f, 1f);
-    }
-
-    private static int arcoirisAlfa(float desplazamiento, int alfa) {
-        return (alfa << 24) | (arcoiris(desplazamiento) & 0x00FFFFFF);
-    }
-
-    // Línea de un solo color (separadores, barra de pestaña...). El arcoíris
-    // queda reservado únicamente para el contorno de los paneles.
-    private static void lineaSolida(DrawContext context, int x0, int x1, int y, int grosor, int color) {
-        context.fill(x0, y, x1, y + grosor, color);
-    }
-
-    private static void bordeArcoiris(DrawContext context, int x0, int y0, int x1, int y1, int grosor, int alfa) {
-        for (int x = x0; x < x1; x += 2) {
-            int xe = Math.min(x + 2, x1);
-            context.fill(x, y0, xe, y0 + grosor, arcoirisAlfa((x + y0) / 300f, alfa));
-            context.fill(x, y1 - grosor, xe, y1, arcoirisAlfa((x + y1) / 300f, alfa));
-        }
-        for (int y = y0; y < y1; y += 2) {
-            int ye = Math.min(y + 2, y1);
-            context.fill(x0, y, x0 + grosor, ye, arcoirisAlfa((x0 + y) / 300f, alfa));
-            context.fill(x1 - grosor, y, x1, ye, arcoirisAlfa((x1 + y) / 300f, alfa));
-        }
-    }
-
-    // Contorno arcoíris grueso (2 px) con un pequeño resplandor por fuera.
-    private static void marcoArcoiris(DrawContext context, int x0, int y0, int x1, int y1) {
-        bordeArcoiris(context, x0 - 2, y0 - 2, x1 + 2, y1 + 2, 1, 0x40);
-        bordeArcoiris(context, x0 - 1, y0 - 1, x1 + 1, y1 + 1, 1, 0x90);
-        bordeArcoiris(context, x0, y0, x1, y1, 2, 0xFF);
-    }
-
-    // ---------------------------------------------------------------
-    // Halloween: dibujos hechos píxel a píxel (no dependen de fuentes
-    // ni de texturas externas) y ambiente animado.
-    // ---------------------------------------------------------------
-    private static final String[] SPRITE_CALABAZA = {
-            "....ggg.....",
-            "..oooggooo..",
-            ".oooooooooo.",
-            "oooooooooooo",
-            "ooyyooooyyoo",
-            "ooyyooooyyoo",
-            "oooooyyooooo",
-            "ooyyyyyyyyoo",
-            "ooyoyyyyoyoo",
-            ".oooooooooo.",
-            "..oooooooo.."
+    // Solo conozco "Evadir SS #1 35d": cambia los demás motivos y tiempos por los tuyos
+    private static final String[][] MOTIVOS_BAN = {
+            {"Evadir SS", "35d", "35d", "35d"}
     };
-
-    private static final String[] SPRITE_MURCIELAGO_ARRIBA = {
-            "kk.....kk",
-            "kkk.k.kkk",
-            ".kkkkkkk.",
-            "..kkkkk..",
-            "...k.k..."
-    };
-
-    private static final String[] SPRITE_MURCIELAGO_ABAJO = {
-            "....k....",
-            ".kk.k.kk.",
-            "kkkkkkkkk",
-            ".kkkkkkk.",
-            "..k...k.."
-    };
-
-    private static final String[] SPRITE_FANTASMA = {
-            "...wwww...",
-            "..wwwwww..",
-            ".wwwwwwww.",
-            ".wkkwwkkw.",
-            ".wkkwwkkw.",
-            ".wwwwwwww.",
-            ".wwwkkwww.",
-            ".wwwkkwww.",
-            ".wwwwwwww.",
-            ".ww.ww.ww.",
-            "w.ww.ww.ww"
-    };
-
-    private int[] estrellas = new int[0]; // pares x,y
-
-    private static void dibujarSprite(DrawContext context, String[] filas, int x, int y, int escala,
-                                      java.util.function.IntUnaryOperator colorDe) {
-        for (int fy = 0; fy < filas.length; fy++) {
-            String fila = filas[fy];
-            for (int fx = 0; fx < fila.length(); fx++) {
-                int color = colorDe.applyAsInt(fila.charAt(fx));
-                if (color == 0) continue;
-                context.fill(x + fx * escala, y + fy * escala, x + (fx + 1) * escala, y + (fy + 1) * escala, color);
-            }
-        }
-    }
-
-    private static void dibujarCalabaza(DrawContext context, int x, int y, int escala, int desfase) {
-        boolean parpadeo = ((System.currentTimeMillis() / 250) + desfase) % 2 == 0;
-        int ojos = parpadeo ? 0xFFFFE04A : 0xFFFFB300;
-        dibujarSprite(context, SPRITE_CALABAZA, x, y, escala, ch -> switch (ch) {
-            case 'o' -> 0xFFFF7A00;
-            case 'g' -> 0xFF3FA535;
-            case 'y' -> ojos;
-            default -> 0;
-        });
-    }
-
-    private static void dibujarTelarana(DrawContext context, int cx, int cy, int dx, int dy, int tam) {
-        int color = 0x99FFFFFF;
-        // hilos radiales
-        for (int i = 0; i <= tam; i++) {
-            context.fill(cx + dx * i, cy, cx + dx * i + 1, cy + 1, color);
-            context.fill(cx, cy + dy * i, cx + 1, cy + dy * i + 1, color);
-            context.fill(cx + dx * i, cy + dy * i, cx + dx * i + 1, cy + dy * i + 1, color);
-            context.fill(cx + dx * i, cy + dy * (i / 2), cx + dx * i + 1, cy + dy * (i / 2) + 1, color);
-            context.fill(cx + dx * (i / 2), cy + dy * i, cx + dx * (i / 2) + 1, cy + dy * i + 1, color);
-        }
-        // hilos en arco
-        for (int r = tam / 3; r <= tam; r += tam / 3) {
-            for (int grados = 0; grados <= 90; grados += 3) {
-                double rad = Math.toRadians(grados);
-                int px = cx + dx * (int) Math.round(r * Math.cos(rad));
-                int py = cy + dy * (int) Math.round(r * Math.sin(rad));
-                context.fill(px, py, px + 1, py + 1, color);
-            }
-        }
-    }
-
-    private static void dibujarArana(DrawContext context, int x) {
-        double t = System.currentTimeMillis() / 700.0;
-        int largo = 14 + (int) Math.round(6 * Math.sin(t));
-        context.fill(x, 0, x + 1, largo, 0xCCFFFFFF);                 // hilo
-        int pata = 0xFF8A8A8A;
-        context.fill(x - 5, largo + 1, x - 2, largo + 2, pata);       // patas
-        context.fill(x - 4, largo + 3, x - 2, largo + 4, pata);
-        context.fill(x + 3, largo + 1, x + 6, largo + 2, pata);
-        context.fill(x + 3, largo + 3, x + 5, largo + 4, pata);
-        context.fill(x - 2, largo, x + 3, largo + 5, 0xFF3A3A3A);     // cuerpo
-        context.fill(x - 1, largo + 1, x, largo + 2, 0xFFFF2020);     // ojos
-        context.fill(x + 1, largo + 1, x + 2, largo + 2, 0xFFFF2020);
-    }
-
-    private static void dibujarLuna(DrawContext context, int cx, int cy) {
-        int radio = 11;
-        for (int yy = -radio; yy <= radio; yy++) {
-            int ancho = (int) Math.sqrt(radio * radio - yy * yy);
-            context.fill(cx - ancho, cy + yy, cx + ancho, cy + yy + 1, 0xFFFFF4B0);
-        }
-        int crater = 0xFFE6D890;
-        context.fill(cx - 5, cy - 4, cx - 2, cy - 1, crater);
-        context.fill(cx + 2, cy + 1, cx + 6, cy + 4, crater);
-        context.fill(cx - 3, cy + 5, cx - 1, cy + 7, crater);
-    }
-
-    private void dibujarAmbienteHalloween(DrawContext context) {
-        long t = System.currentTimeMillis();
-
-        // Cielo de noche: morado arriba, naranja abajo
-        context.fillGradient(0, 0, this.width, this.height, 0x903A0B5E, 0x80FF6A00);
-
-        // Estrellas parpadeantes
-        for (int i = 0; i + 1 < estrellas.length; i += 2) {
-            double brillo = 0.5 + 0.5 * Math.sin(t / 500.0 + i);
-            int alfa = 40 + (int) (brillo * 140);
-            context.fill(estrellas[i], estrellas[i + 1], estrellas[i] + 1, estrellas[i + 1] + 1, (alfa << 24) | 0xFFFFFF);
-        }
-
-        // Luna y fantasma solo si caben en el espacio libre a la derecha de los paneles
-        int limite = mostrarRegistro ? registroX + registroAncho + 8 : panelX + panelAncho + PADDING_PANEL;
-        int lunaX = this.width - 30;
-        if (lunaX - 12 >= limite + 4) {
-            dibujarLuna(context, lunaX, 30);
-        }
-        int fantasmaX = this.width - 52;
-        if (fantasmaX >= limite + 4) {
-            int fantasmaY = this.height - 70 + (int) Math.round(6 * Math.sin(t / 600.0));
-            dibujarSprite(context, SPRITE_FANTASMA, fantasmaX, fantasmaY, 3, ch -> switch (ch) {
-                case 'w' -> 0xCCFFFFFF;
-                case 'k' -> 0xFF000000;
-                default -> 0;
-            });
-        }
-
-        // Murciélagos cruzando la pantalla
-        for (int i = 0; i < 4; i++) {
-            double velocidad = 0.05 + i * 0.015; // px por ms
-            int recorrido = this.width + 60;
-            int x = (int) ((t * velocidad + i * 97) % recorrido) - 30;
-            int y = 30 + i * (this.height / 5) + (int) Math.round(14 * Math.sin(t / 400.0 + i * 1.7));
-            boolean alasArriba = ((t / 150) + i) % 2 == 0;
-            dibujarSprite(context, alasArriba ? SPRITE_MURCIELAGO_ARRIBA : SPRITE_MURCIELAGO_ABAJO, x, y, 2,
-                    ch -> ch == 'k' ? 0xFF000000 : 0);
-        }
-
-        dibujarCementerio(context);
-        dibujarNiebla(context, t);
-        dibujarBrasas(context, t);
-        dibujarOjos(context, t);
-    }
-
-    private static final String[] SPRITE_LAPIDA = {
-            "..ssssss..",
-            ".ssssssss.",
-            "ssssddssss",
-            "ssssddssss",
-            "ssdddddsss",
-            "ssssddssss",
-            "ssssddssss",
-            "ssssssssss",
-            "ssssssssss",
-            "ssssssssss",
-            "gggggggggg"
-    };
-
-    private static void dibujarHalo(DrawContext context, int cx, int cy, int radio) {
-        for (int r = radio; r > 0; r -= 3) {
-            for (int yy = -r; yy <= r; yy++) {
-                int ancho = (int) Math.sqrt(r * r - yy * yy);
-                context.fill(cx - ancho, cy + yy, cx + ancho, cy + yy + 1, 0x14FF8C00);
-            }
-        }
-    }
-
-    // Fila de calabazas y lápidas sobre el suelo, en el margen inferior.
-    private void dibujarCementerio(DrawContext context) {
-        context.fill(0, this.height - 3, this.width, this.height, 0xFF120818);
-        for (int i = 0, x = 10; x < this.width - 20; i++, x += 56) {
-            int y = this.height - 14;
-            if (i % 3 == 1) {
-                dibujarSprite(context, SPRITE_LAPIDA, x, y, 1, ch -> switch (ch) {
-                    case 's' -> 0xFF6E6E7A;
-                    case 'd' -> 0xFF3A3A44;
-                    case 'g' -> 0xFF2E6B28;
-                    default -> 0;
-                });
-            } else {
-                dibujarHalo(context, x + 6, y + 5, 12);
-                dibujarCalabaza(context, x, y, 1, i);
-            }
-        }
-    }
-
-    // Niebla baja que se desplaza lentamente.
-    private void dibujarNiebla(DrawContext context, long t) {
-        for (int i = 0; i < 4; i++) {
-            int ancho = 140 + i * 40;
-            int x = (int) ((t / (30 + i * 12)) % (this.width + ancho)) - ancho;
-            int y = this.height - 30 - i * 5;
-            int alfa = 0x18 + i * 4;
-            context.fillGradient(x, y, x + ancho, y + 14, 0x00FFFFFF, (alfa << 24) | 0xFFFFFF);
-        }
-        context.fillGradient(0, this.height - 22, this.width, this.height, 0x00B8A0FF, 0x40B8A0FF);
-    }
-
-    // Brasas / luciérnagas naranjas que suben flotando.
-    private void dibujarBrasas(DrawContext context, long t) {
-        int ancho = Math.max(1, this.width);
-        for (int i = 0; i < 28; i++) {
-            double vel = 0.012 + (i % 5) * 0.005;
-            int y = this.height - (int) ((t * vel + i * 41) % Math.max(1, this.height));
-            int x = (i * 67 + (int) Math.round(Math.sin(t / 900.0 + i) * 8)) % ancho;
-            if (x < 0) x += ancho;
-            int alfa = 80 + (int) (100 * (0.5 + 0.5 * Math.sin(t / 200.0 + i)));
-            int tam = (i % 3 == 0) ? 2 : 1;
-            context.fill(x, y, x + tam, y + tam, (alfa << 24) | (i % 2 == 0 ? 0xFF8C00 : 0xFFD24A));
-        }
-    }
-
-    // Ojos que parpadean en la oscuridad del margen izquierdo.
-    private void dibujarOjos(DrawContext context, long t) {
-        int[] colores = { 0xFFFF2020, 0xFFFFE04A, 0xFF55FF55, 0xFFFF2020 };
-        for (int i = 0; i < 4; i++) {
-            if (((t / 400) + i * 7) % 12 == 0) continue; // parpadeo
-            int y = (this.height / 5) * (i + 1);
-            context.fill(2, y, 4, y + 2, colores[i]);
-            context.fill(6, y, 8, y + 2, colores[i]);
-        }
-    }
-
-    private enum Pestana { MUTES, BANEOS, SS, ANTICHEAT }
-
-    // ---------- Contenido informativo de la pestaña AntiCheat ----------
-    private enum TipoLineaAntiCheat { TITULO, SUBTITULO, TEXTO, SEPARADOR }
-
-    private record LineaAntiCheat(String texto, TipoLineaAntiCheat tipo) {}
-
-    private static LineaAntiCheat titulo(String t) { return new LineaAntiCheat(t, TipoLineaAntiCheat.TITULO); }
-    private static LineaAntiCheat subtitulo(String t) { return new LineaAntiCheat(t, TipoLineaAntiCheat.SUBTITULO); }
-    private static LineaAntiCheat texto(String t) { return new LineaAntiCheat(t, TipoLineaAntiCheat.TEXTO); }
-    private static LineaAntiCheat separador() { return new LineaAntiCheat("", TipoLineaAntiCheat.SEPARADOR); }
-
-    private static final List<LineaAntiCheat> CONTENIDO_ANTICHEAT = List.of(
-            titulo("Tipos de Alertas y su Validez para SS"),
-
-            subtitulo("Actions (InvalidB)"),
-            texto("Totalmente insegura."),
-            texto("Prohibido llevar a SS solo por esta alerta."),
-            separador(),
-
-            subtitulo("Timer (mínimo 3 alertas)"),
-            texto("Insegura por sí sola."),
-            texto("Con 3 o más alertas es válida para SS."),
-            separador(),
-
-            subtitulo("Aim (mínimo 2 alertas)"),
-            texto("Generalmente muy precisa."),
-            texto("Altamente sospechosa de hacks."),
-            texto("Con 2 alertas es válida."),
-            separador(),
-
-            subtitulo("Invalid A (mínimo 3 alertas)"),
-            texto("Generalmente muy precisa."),
-            texto("Altamente sospechosa de hacks."),
-            texto("Con 3 alertas es válida."),
-            texto("Solo aparece en los logs"),
-            separador(),
-
-            subtitulo("Range (mínimo 2 alertas)"),
-            texto("No es 100% segura."),
-            texto("Con 2 o más alertas es válida para SS."),
-            separador(),
-
-            subtitulo("Combat (InvalidC) (mínimo 2 alertas)"),
-            texto("Insegura en varios casos."),
-            texto("Válida con mínimo 2 alertas."),
-            separador(),
-
-            subtitulo("Clicking (Autoclicker B) (mínimo 1 alerta)"),
-            texto("No se refiere al click normal."),
-            texto("100% confiable."),
-            texto("Con 1 alerta ya es válida para SS."),
-            texto("Aunque en los logs sale como Autoclicker puede llegar a ser autoclicker o hacks."),
-            texto("Cuando lleven por Clicking, preguntar: \"¿Admites uso de hacks o SS?\""),
-            separador(),
-
-            subtitulo("Autoclicker (mínimo 1 alerta) (Solo sale en logs)"),
-            texto("No es 100% segura."),
-            texto("Con 1 alerta ya es válida."),
-            separador(),
-
-            subtitulo("AutoSign (mínimo 2 alertas)"),
-            texto("Aún no sabemos al 100% qué detecta exactamente."),
-            texto("En los casos revisados, cuando se llevó a SS por esta alerta el usuario terminó baneado."),
-            texto("Válida con mínimo 2 alertas."),
-            separador(),
-
-            subtitulo("TriggerBot (mínimo 2 alertas)"),
-            texto("Medianamente segura cuando aparece."),
-            texto("Puede indicar el uso de TriggerBot."),
-            texto("Válida con mínimo 2 alertas."),
-            separador(),
-
-            subtitulo("AutomatedInventory (Solo combinadas)"),
-            texto("Para llevar a revisión a un usuario por esta alerta SOLO podrá ser por alertas combinadas pero tendrán que tener un mínimo:"),
-            texto("Tiene que tener mínimo 7 ALERTAS de este tipo y una de cualquier otro tipo válidas."),
-            separador(),
-
-            subtitulo("AutoTool (Solo combinadas)"),
-            texto("Para llevar a revisión a un usuario por esta alerta SOLO podrá ser por alertas combinadas, pero tendrán que tener un mínimo:"),
-            texto("Tiene que tener mínimo 5 ALERTAS de este tipo y una de cualquier otro tipo válidas."),
-            separador(),
-
-            subtitulo("AutoJumpReset (mínimo 3 alertas)"),
-            texto("No es una alerta totalmente segura."),
-            texto("Aun así, cuando aparece varias veces seguidas normalmente el usuario suele llevar alguna modificación."),
-            texto("Válida con mínimo 3 alertas."),
-            separador(),
-
-            subtitulo("GroundSpoof"),
-            texto("Totalmente insegura."),
-            texto("Prohibido llevar a SS solo por esta alerta."),
-            separador(),
-
-            subtitulo("Inventory (mínimo 2 alertas)"),
-            texto("Insegura, pero utilizable."),
-            texto("Con 2 alertas es válida para SS."),
-            separador(),
-
-            subtitulo("Alertas Combinadas"),
-            texto("Si un usuario activa:"),
-            texto("1 alerta de un tipo"),
-            texto("y 1 alerta de otro tipo distinto"),
-            texto("También es válido llevarlo a SS por alertas combinadas."),
-            texto("Excepto Actions.")
-    );
-
-    // ---------- Mensajes predefinidos de la pestaña SS ----------
-    private record MensajeSS(String etiqueta, String texto) {}
-
-    private static final MensajeSS[] MENSAJES_SS = new MensajeSS[] {
-            new MensajeSS("¿Admites uso de Hacks o prefiere SS? (60s) Si admite su baneo sera mucho menor.", "¿Admites uso de Hacks o prefiere SS? (60s) Si admite su baneo sera mucho menor."),
-            new MensajeSS("30s", "30s"),
-            new MensajeSS("10s", "10s"),
-            new MensajeSS("9s", "9s"),
-            new MensajeSS("8s", "8s"),
-            new MensajeSS("7s", "7s"),
-            new MensajeSS("6s", "6s"),
-            new MensajeSS("5s", "5s"),
-            new MensajeSS("4s", "4s"),
-            new MensajeSS("3s", "3s"),
-            new MensajeSS("2s", "2s"),
-            new MensajeSS("1s", "1s"),
-            new MensajeSS("0s", "0s"),
-            new MensajeSS("Tienes 5 minutos para pasarme tu codigo de AnyDesk.com", "Tienes 5 minutos para pasarme tu codigo de AnyDesk.com"),
-            new MensajeSS("Tiempo terminado", "Tu tiempo se termino."),
-    };
-
-    // ---------------------------------------------------------------
-    // Registro en vivo (chat del servidor + acciones del panel).
-    // Estático porque debe sobrevivir a que el usuario cierre y abra
-    // la pantalla varias veces, y el listener de chat solo puede
-    // registrarse una vez con el sistema de eventos de Fabric.
-    // ---------------------------------------------------------------
-    private static final class RegistroModeracion {
-        private enum Tipo { ACCION, RESPUESTA }
-        private record Entrada(String hora, Tipo tipo, String texto) {}
-
-        private static final int MAX_ENTRADAS = 400;
-        private static final DateTimeFormatter FORMATO_HORA = DateTimeFormatter.ofPattern("HH:mm:ss");
-        private static final List<Entrada> ENTRADAS = Collections.synchronizedList(new ArrayList<>());
-        private static boolean registrado = false;
-
-        static void asegurarRegistro() {
-            if (registrado) return;
-            registrado = true;
-            // Requiere el módulo fabric-message-api-v1 de Fabric API como dependencia del mod.
-            // Solo se registran comandos (escritos a mano o lanzados desde este panel,
-            // p. ej. /logs, /hist, /ban...) y las respuestas del servidor a esos comandos
-            // (p. ej. el historial de sanciones). El chat normal del jugador ya NO se
-            // registra en el minichat.
-            ClientSendMessageEvents.COMMAND.register(comando -> {
-                if (comando == null || comando.isBlank()) return;
-                agregar(Tipo.ACCION, "/" + comando);
-            });
-            // Respuestas/mensajes de sistema que envía el servidor (p. ej. lo que
-            // muestra /logs o /hist debajo del comando). Se ignoran los mensajes de
-            // la action bar (overlay = true), solo interesan los del chat/consola.
-            ClientReceiveMessageEvents.GAME.register((mensaje, overlay) -> {
-                if (overlay || mensaje == null) return;
-                String texto = mensaje.getString();
-                if (texto == null || texto.isBlank()) return;
-                agregar(Tipo.RESPUESTA, texto);
-            });
-        }
-
-        private static void agregar(Tipo tipo, String texto) {
-            Entrada entrada = new Entrada(LocalTime.now().format(FORMATO_HORA), tipo, texto);
-            synchronized (ENTRADAS) {
-                ENTRADAS.add(entrada);
-                while (ENTRADAS.size() > MAX_ENTRADAS) {
-                    ENTRADAS.remove(0);
-                }
-            }
-        }
-
-        static List<Entrada> copia() {
-            synchronized (ENTRADAS) {
-                return new ArrayList<>(ENTRADAS);
-            }
-        }
-
-        static void limpiar() {
-            synchronized (ENTRADAS) {
-                ENTRADAS.clear();
-            }
-        }
-    }
-
-    private Pestana pestanaActual = Pestana.MUTES;
-    private int paginaMutes = 0;
-    private int paginaBaneos = 0;
-    private int paginaSS = 0;
-    private int filasPorPagina = 6;
-
-    private TextFieldWidget campoUsuario;
-    private String ultimoUsuario = "";
-
-    private String ultimoTextoMute = "";
-    private String ultimoTextoBan = "";
-    private Text mensaje = Text.empty();
-
-    // ---------- Selección de sanción (nivel + razón) ----------
-    private int nivelActual = 1;
-    private Config.Motivo motivoMuteSel = null;
-    private Config.Motivo motivoBanSel = null;
-
-    private ButtonWidget tabMutesBtn;
-    private ButtonWidget tabBaneosBtn;
-    private ButtonWidget tabSSBtn;
-    private ButtonWidget tabAntiCheatBtn;
-    private ButtonWidget anteriorBtn;
-    private ButtonWidget siguienteBtn;
-    private ButtonWidget logsBtn;
-    private ButtonWidget copiarBanBtn;
-    private ButtonWidget copiarMuteBtn;
-    private ButtonWidget limpiarRegistroBtn;
-    private ButtonWidget historialBtn;
-    private ButtonWidget ssComandoBtn;
-    private ButtonWidget nivelBtn;
-    private ButtonWidget ejecutarBtn;
-    private ButtonWidget serverBtn;
-
-    // ---------- Desplegable del botón "Server" ----------
-    private boolean servidoresAbierto = false;
-
-    // ---------- Desplegable de motivos (Mutes / Baneos) ----------
-    private boolean motivosAbierto = false;
-    private int motivosScroll = 0;
-
-    // ---------- Panel de la pestaña AntiCheat (texto informativo con scroll) ----------
-    private final List<OrderedText> anticheatLineasCache = new ArrayList<>();
-    private final List<Integer> anticheatColoresCache = new ArrayList<>();
-    private final List<Boolean> anticheatSeparadorCache = new ArrayList<>();
-    private int anticheatCacheAncho = -1;
-    private int anticheatScroll = 0;
-
-    private final List<ButtonWidget> filasBotones = new ArrayList<>();
-
-    private int panelX;
-    private int panelAncho;
-    private int tituloY;
-    private int tabsY;
-    private int usuarioY;
-    private int filasY0;
-    private int paginacionY;
-    private int comandoY;
-    private int ejecutarY;
-    private int accionesY;
-    private int utilidadesLabelY;
-    private int utilidadesY;
-    private int mensajeY;
-    private int panelTopY;
-    private int panelBottomY;
-
-    // ---------- Lista de autocompletado de nombres ----------
-    private int sugerenciasY;
-    private int sugerenciasAncho;
-
-    // ---------- Panel de registro (mini chat con logs + historial) ----------
-    private boolean mostrarRegistro;
-    private int registroX;
-    private int registroAncho;
-    private int registroCajaTopY;
-    private int registroCajaBottomY;
-    private int registroContenidoY0;
-    private int registroContenidoY1;
-    private int registroScroll = 0;
-    private boolean registroAutoScroll = true;
-
-    private final List<OrderedText> registroLineasCache = new ArrayList<>();
-    private final List<Integer> registroColoresCache = new ArrayList<>();
-    private int registroCacheTamano = -1;
-    private int registroCacheAncho = -1;
-
-    public ModeracionScreen() {
-        super(Text.of("Moderación Minebosh"));
-        cargarEstado();
-        RegistroModeracion.asegurarRegistro();
+    // Servidores del desplegable de /server: pon los tuyos
+    private static final String[] SERVIDORES = {"lobby", "survival", "skyblock"};
+    // ======================
+
+    private static final int ANCHO = 280;
+    private static final int FONDO = 0xFF0A0A14;
+    private static final int ACENTO = 0xFF00E5FF;
+    private static final int MORADO = 0xFFB000FF;
+
+    private final Config.Nivel nivel;
+
+    private String nick = "";
+    private boolean modoBan = false;
+    private int lvl = 0;          // 0..2  => #1..#3
+    private int motivoIdx = 0;
+    private int abierto = 0;      // 0 ninguno, 1 nivel, 2 motivo, 3 server
+
+    private TextFieldWidget campoNick;
+    private final List<ButtonWidget> sugerencias = new ArrayList<>();
+    private int previewY = -1;
+
+    public ModeracionScreen(Config.Nivel nivel) {
+        super(Text.literal("Moderacion"));
+        this.nivel = nivel;
     }
 
     @Override
     protected void init() {
-        this.panelAncho = ANCHO_ETIQUETA + (ANCHO_BOTON * 3) + (ESPACIO * 4);
-        this.servidoresAbierto = false;
-        this.motivosAbierto = false;
+        sugerencias.clear();
+        int x = width / 2 - ANCHO / 2;
 
-        // Estrellas del cielo de Halloween (posiciones fijas para esta pantalla)
-        java.util.Random azar = new java.util.Random(31);
-        this.estrellas = new int[120];
-        for (int i = 0; i < estrellas.length; i += 2) {
-            estrellas[i] = azar.nextInt(Math.max(1, this.width));
-            estrellas[i + 1] = azar.nextInt(Math.max(1, this.height));
-        }
-
-        // El panel principal se ancla arriba a la izquierda (no centrado).
-        this.panelX = MARGEN_PANTALLA;
-        this.panelTopY = MARGEN_PANTALLA;
-        this.panelBottomY = this.height - MARGEN_PANTALLA;
-
-        // El mini chat de registro va justo pegado al menú principal: su línea
-        // izquierda coincide exactamente con la línea derecha del menú (sin
-        // hueco, pero sin solaparse), y su línea superior/inferior quedan a la
-        // misma altura que las del menú. El tamaño (REGISTRO_ANCHO) no cambia.
-        this.registroAncho = REGISTRO_ANCHO;
-        int bordeDerechoPanel = panelX + panelAncho + PADDING_PANEL;
-        this.registroX = bordeDerechoPanel + 8;
-        this.registroCajaTopY = panelTopY;
-        this.registroCajaBottomY = panelBottomY;
-
-        // Solo se muestra si cabe entera dentro de la ventana.
-        this.mostrarRegistro = (registroX + registroAncho + MARGEN_PANTALLA) <= this.width
-                && (registroCajaBottomY - registroCajaTopY) >= 80;
-
-        this.tabsY = panelTopY + PADDING_PANEL;
-        this.tituloY = tabsY - 20;
-
-        int cuartoTab = (panelAncho - ESPACIO * 3) / 4;
-        int ultimoTabAncho = panelAncho - cuartoTab * 3 - ESPACIO * 3;
-        this.tabMutesBtn = BotonNaranja.nuevo(Text.of("Mutes"), b -> cambiarPestana(Pestana.MUTES))
-                .dimensions(panelX, tabsY, cuartoTab, ALTO)
-                .build();
-        this.tabBaneosBtn = BotonNaranja.nuevo(Text.of("Baneos"), b -> cambiarPestana(Pestana.BANEOS))
-                .dimensions(panelX + cuartoTab + ESPACIO, tabsY, cuartoTab, ALTO)
-                .build();
-        this.tabSSBtn = BotonNaranja.nuevo(Text.of("SS"), b -> cambiarPestana(Pestana.SS))
-                .dimensions(panelX + (cuartoTab + ESPACIO) * 2, tabsY, cuartoTab, ALTO)
-                .build();
-        this.tabAntiCheatBtn = BotonNaranja.nuevo(Text.of("AntiCheat"), b -> cambiarPestana(Pestana.ANTICHEAT))
-                .dimensions(panelX + (cuartoTab + ESPACIO) * 3, tabsY, ultimoTabAncho, ALTO)
-                .build();
-        this.addDrawableChild(tabMutesBtn);
-        this.addDrawableChild(tabBaneosBtn);
-        this.addDrawableChild(tabSSBtn);
-        this.addDrawableChild(tabAntiCheatBtn);
-
-        this.usuarioY = tabsY + ALTO + ESPACIO * 2;
-        int anchoBotonUsuario = 54;
-        int anchoBotonesUsuario = anchoBotonUsuario * 3 + ESPACIO * 2; // Historial + SS + Logs
-        this.campoUsuario = new TextFieldWidget(
-                this.textRenderer,
-                panelX,
-                usuarioY,
-                panelAncho - anchoBotonesUsuario - ESPACIO,
-                ALTO,
-                Text.of("Usuario"));
-        this.campoUsuario.setMaxLength(32);
-        this.campoUsuario.setSuggestion("Nombre del usuario"); // en 1.20.1 no existe setPlaceholder
-        this.campoUsuario.setText(ultimoUsuario);
-        // Guarda lo escrito al instante, letra a letra, hasta que el usuario lo
-        // vuelva a cambiar (no hace falta pulsar ningún botón para que persista).
-        // La sugerencia en gris (autocompletado) se actualiza en render().
-        this.campoUsuario.setChangedListener(texto -> {
-            this.ultimoUsuario = texto;
-            guardarEstado();
+        campoNick = new TextFieldWidget(textRenderer, x, 50, ANCHO, 20, Text.literal("Nick"));
+        campoNick.setMaxLength(32);
+        campoNick.setPlaceholder(Text.literal("Nombre de usuario"));
+        campoNick.setText(nick);
+        campoNick.setChangedListener(t -> {
+            nick = t;
+            refrescarSugerencias();
         });
-        this.addDrawableChild(campoUsuario);
+        addDrawableChild(campoNick);
+        setInitialFocus(campoNick);
+        refrescarSugerencias();
 
-        // Lista de nombres que aparece debajo del campo mientras se escribe.
-        this.sugerenciasY = usuarioY + ALTO + 1;
-        this.sugerenciasAncho = campoUsuario.getWidth();
-
-        int xBotonesUsuario = panelX + panelAncho - anchoBotonesUsuario;
-
-        this.historialBtn = BotonNaranja.nuevo(Text.of("Historial"), b -> ejecutarHistorial())
-                .dimensions(xBotonesUsuario, usuarioY, anchoBotonUsuario, ALTO)
-                .build();
-        this.addDrawableChild(historialBtn);
-
-        this.ssComandoBtn = BotonNaranja.nuevo(Text.of("SS"), b -> ejecutarSS())
-                .dimensions(xBotonesUsuario + anchoBotonUsuario + ESPACIO, usuarioY, anchoBotonUsuario, ALTO)
-                .build();
-        this.addDrawableChild(ssComandoBtn);
-
-        // El campo de usuario y sus botones asociados no tienen sentido en la
-        // pestaña AntiCheat (es solo contenido informativo), así que se ocultan.
-        this.campoUsuario.visible = (pestanaActual != Pestana.ANTICHEAT);
-        this.historialBtn.visible = (pestanaActual != Pestana.ANTICHEAT);
-        this.ssComandoBtn.visible = (pestanaActual != Pestana.ANTICHEAT);
-
-        // "Logs" solo tiene sentido para baneos, así que solo se muestra en esa pestaña
-        this.logsBtn = BotonNaranja.nuevo(Text.of("Logs"), b -> ejecutarLogs())
-                .dimensions(xBotonesUsuario + (anchoBotonUsuario + ESPACIO) * 2, usuarioY, anchoBotonUsuario, ALTO)
-                .build();
-        this.logsBtn.visible = (pestanaActual == Pestana.BANEOS);
-        this.addDrawableChild(logsBtn);
-
-        this.filasY0 = usuarioY + ALTO + ESPACIO * 3;
-
-        // Reserva fija de la parte inferior (paginación, vista previa del comando,
-        // nivel/ejecutar, acciones, utilidades y aviso) para calcular cuántas filas
-        // de motivos caben usando TODO el alto disponible.
-        int reservaInferior = (ALTO + ESPACIO * 3)            // hasta el comando
-                + (ALTO + ESPACIO * 3 + 12)                   // comando + fila Nivel/Banear
-                + (ALTO + ESPACIO * 3)                        // hasta utilidadesLabelY
-                + 10                                          // hasta utilidadesY
-                + (ALTO + 14)                                 // hasta mensajeY
-                + 12;                                         // hasta panelBottomY
-        int espacioParaFilas = panelBottomY - filasY0 - ESPACIO - reservaInferior;
-        int filasCalculadas = espacioParaFilas / (ALTO + ESPACIO);
-        this.filasPorPagina = Math.max(FILAS_MIN, Math.min(FILAS_MAX, filasCalculadas));
-
-        this.paginacionY = filasY0 + filasPorPagina * (ALTO + ESPACIO) + ESPACIO;
-        this.comandoY = paginacionY + ALTO + ESPACIO * 2;
-        this.ejecutarY = comandoY + 12 + ESPACIO;
-        this.accionesY = ejecutarY + ALTO + ESPACIO * 3;
-
-        this.anteriorBtn = BotonNaranja.nuevo(Text.of("◀"), b -> cambiarPagina(-1))
-                .dimensions(panelX, paginacionY, 40, ALTO)
-                .build();
-        this.siguienteBtn = BotonNaranja.nuevo(Text.of("▶"), b -> cambiarPagina(1))
-                .dimensions(panelX + panelAncho - 40, paginacionY, 40, ALTO)
-                .build();
-        this.addDrawableChild(anteriorBtn);
-        this.addDrawableChild(siguienteBtn);
-
-        // ---------- Fila de sanción: botón de nivel + botón Banear/Mutear ----------
-        int anchoNivel = 100;
-        boolean pestanaSancion = (pestanaActual == Pestana.MUTES || pestanaActual == Pestana.BANEOS);
-        this.nivelBtn = BotonNaranja.nuevo(Text.of("Nivel: #" + nivelActual), b -> cambiarNivel())
-                .dimensions(panelX, ejecutarY, anchoNivel, ALTO)
-                .build();
-        this.nivelBtn.visible = pestanaSancion;
-        this.addDrawableChild(nivelBtn);
-
-        this.ejecutarBtn = BotonNaranja.nuevo(
-                        Text.of(pestanaActual == Pestana.MUTES ? "Mutear" : "Banear"),
-                        b -> ejecutarSeleccion())
-                .dimensions(panelX + anchoNivel + ESPACIO, ejecutarY, panelAncho - anchoNivel - ESPACIO, ALTO)
-                .build();
-        this.ejecutarBtn.visible = pestanaSancion;
-        this.addDrawableChild(ejecutarBtn);
-
-        int anchoCopiar = panelAncho - 90 - ESPACIO;
-        this.copiarBanBtn = BotonNaranja.nuevo(Text.of("Copiar Último Ban"), b -> copiarUltimoBan())
-                .dimensions(panelX, accionesY, anchoCopiar, ALTO)
-                .build();
-        this.copiarBanBtn.visible = (pestanaActual == Pestana.BANEOS);
-        this.addDrawableChild(copiarBanBtn);
-
-        this.copiarMuteBtn = BotonNaranja.nuevo(Text.of("Copiar Último Mute"), b -> copiarUltimoMute())
-                .dimensions(panelX, accionesY, anchoCopiar, ALTO)
-                .build();
-        this.copiarMuteBtn.visible = (pestanaActual == Pestana.MUTES);
-        this.addDrawableChild(copiarMuteBtn);
-
-        ButtonWidget cerrarBtn = BotonNaranja.nuevo(Text.of("Cerrar"), b -> this.close())
-                .dimensions(panelX + panelAncho - 90, accionesY, 90, ALTO)
-                .build();
-        this.addDrawableChild(cerrarBtn);
-
-        // ---------- Fila de utilidades: comandos fijos, sin usuario ----------
-        this.utilidadesLabelY = accionesY + ALTO + ESPACIO * 3;
-        this.utilidadesY = utilidadesLabelY + 10;
-
-        int anchoUtil = (panelAncho - ESPACIO * 5) / 6;
-        int xUtil = panelX;
-
-        ButtonWidget vanishBtn = BotonNaranja.nuevo(Text.of("Vanish"), b -> enviar("vanish"))
-                .dimensions(xUtil, utilidadesY, anchoUtil, ALTO)
-                .build();
-        this.addDrawableChild(vanishBtn);
-        xUtil += anchoUtil + ESPACIO;
-
-        ButtonWidget flyBtn = BotonNaranja.nuevo(Text.of("Fly"), b -> enviar("fly"))
-                .dimensions(xUtil, utilidadesY, anchoUtil, ALTO)
-                .build();
-        this.addDrawableChild(flyBtn);
-        xUtil += anchoUtil + ESPACIO;
-
-        ButtonWidget velSueloBtn = BotonNaranja.nuevo(Text.of("Vel. Suelo"), b -> enviar("flyspeed walk 10"))
-                .dimensions(xUtil, utilidadesY, anchoUtil, ALTO)
-                .build();
-        this.addDrawableChild(velSueloBtn);
-        xUtil += anchoUtil + ESPACIO;
-
-        ButtonWidget velVueloBtn = BotonNaranja.nuevo(Text.of("Vel. Vuelo"), b -> enviar("flyspeed fly 4"))
-                .dimensions(xUtil, utilidadesY, anchoUtil, ALTO)
-                .build();
-        this.addDrawableChild(velVueloBtn);
-        xUtil += anchoUtil + ESPACIO;
-
-        ButtonWidget alertsBtn = BotonNaranja.nuevo(Text.of("Alertas"), b -> enviar("alerts"))
-                .dimensions(xUtil, utilidadesY, anchoUtil, ALTO)
-                .build();
-        this.addDrawableChild(alertsBtn);
-        xUtil += anchoUtil + ESPACIO;
-
-        // Botón "Server": abre un desplegable con los servidores (se ocupa el ancho que queda).
-        this.serverBtn = BotonNaranja.nuevo(Text.of("Server ▾"), b -> {
-                    motivosAbierto = false;
-                    servidoresAbierto = !servidoresAbierto;
-                })
-                .dimensions(xUtil, utilidadesY, panelX + panelAncho - xUtil, ALTO)
-                .build();
-        this.addDrawableChild(serverBtn);
-
-        this.mensajeY = utilidadesY + ALTO + 14;
-
-        // ---------- Mini chat de registro: cajita en la esquina inferior derecha ----------
-        if (this.mostrarRegistro) {
-            int anchoLimpiar = 50;
-            this.limpiarRegistroBtn = BotonNaranja.nuevo(Text.of("Limpiar"), b -> {
-                        RegistroModeracion.limpiar();
-                        registroCacheTamano = -1; // fuerza reconstrucción del caché
-                        registroScroll = 0;
-                        registroAutoScroll = true;
-                    })
-                    .dimensions(registroX + registroAncho - anchoLimpiar - 4, registroCajaTopY + 2, anchoLimpiar, 12)
-                    .build();
-            this.addDrawableChild(limpiarRegistroBtn);
-
-            this.registroContenidoY0 = registroCajaTopY + REGISTRO_TITULO_ALTO;
-            this.registroContenidoY1 = registroCajaBottomY - 6;
-            registroCacheTamano = -1; // recalcular al (re)abrir la pantalla
-        }
-
-        construirFilas();
-        actualizarPaginacion();
-    }
-
-    // ---------------------------------------------------------------
-    // Datos según la pestaña activa
-    // ---------------------------------------------------------------
-
-    private Config.Motivo[] motivosActuales() {
-        return pestanaActual == Pestana.MUTES ? Config.MOTIVOS_MUTE : Config.MOTIVOS_BAN;
-    }
-
-    private Config.Motivo motivoSeleccionado() {
-        return switch (pestanaActual) {
-            case MUTES -> motivoMuteSel;
-            case BANEOS -> motivoBanSel;
-            default -> null;
-        };
-    }
-
-    private int cantidadItemsActual() {
-        // Mutes/Baneos usan desplegable y AntiCheat tiene scroll propio: ninguno se pagina.
-        if (pestanaActual != Pestana.SS) return 0;
-        return MENSAJES_SS.length;
-    }
-
-    private int paginaActual() {
-        return switch (pestanaActual) {
-            case MUTES -> paginaMutes;
-            case BANEOS -> paginaBaneos;
-            case SS -> paginaSS;
-            case ANTICHEAT -> 0;
-        };
-    }
-
-    private void setPaginaActual(int pagina) {
-        switch (pestanaActual) {
-            case MUTES -> paginaMutes = pagina;
-            case BANEOS -> paginaBaneos = pagina;
-            case SS -> paginaSS = pagina;
-            case ANTICHEAT -> { /* no aplica */ }
-        }
-    }
-
-    private int totalPaginas() {
-        int total = cantidadItemsActual();
-        return Math.max(1, (int) Math.ceil(total / (double) filasPorPagina));
-    }
-
-    // ---------------------------------------------------------------
-    // Interacción
-    // ---------------------------------------------------------------
-
-    private void cambiarPestana(Pestana pestana) {
-        if (this.pestanaActual == pestana) return;
-        this.motivosAbierto = false;
-        this.motivosScroll = 0;
-        this.pestanaActual = pestana;
-        this.logsBtn.visible = (pestana == Pestana.BANEOS);
-        this.copiarBanBtn.visible = (pestana == Pestana.BANEOS);
-        this.copiarMuteBtn.visible = (pestana == Pestana.MUTES);
-        this.campoUsuario.visible = (pestana != Pestana.ANTICHEAT);
-        this.historialBtn.visible = (pestana != Pestana.ANTICHEAT);
-        this.ssComandoBtn.visible = (pestana != Pestana.ANTICHEAT);
-        boolean pestanaSancion = (pestana == Pestana.MUTES || pestana == Pestana.BANEOS);
-        this.nivelBtn.visible = pestanaSancion;
-        this.ejecutarBtn.visible = pestanaSancion;
-        this.ejecutarBtn.setMessage(Text.of(pestana == Pestana.MUTES ? "Mutear" : "Banear"));
-        guardarEstado();
-        construirFilas();
-        actualizarPaginacion();
-    }
-
-    private void cambiarPagina(int delta) {
-        int total = totalPaginas();
-        int nueva = Math.floorMod(paginaActual() + delta, total);
-        setPaginaActual(nueva);
-        construirFilas();
-        actualizarPaginacion();
-    }
-
-    private void actualizarPaginacion() {
-        boolean multiPagina = totalPaginas() > 1;
-        this.anteriorBtn.visible = multiPagina;
-        this.siguienteBtn.visible = multiPagina;
-    }
-
-    private void construirFilas() {
-        for (ButtonWidget boton : filasBotones) {
-            this.remove(boton);
-        }
-        filasBotones.clear();
-
-        if (pestanaActual == Pestana.ANTICHEAT) {
-            return; // el contenido se dibuja directamente en render(), con scroll propio
-        }
-
-        int pagina = paginaActual();
-        int inicio = pagina * filasPorPagina;
-
-        if (pestanaActual == Pestana.SS) {
-            int fin = Math.min(inicio + filasPorPagina, MENSAJES_SS.length);
-            for (int i = inicio; i < fin; i++) {
-                MensajeSS item = MENSAJES_SS[i];
-                int fila = i - inicio;
-                int y = filasY0 + fila * (ALTO + ESPACIO);
-                ButtonWidget boton = BotonNaranja.nuevo(Text.of(item.etiqueta()), b -> ejecutarMensajeSS(item.texto()))
-                        .dimensions(panelX, y, panelAncho, ALTO)
-                        .build();
-                this.addDrawableChild(boton);
-                filasBotones.add(boton);
-            }
-            return;
-        }
-
-        // Mutes / Baneos: un solo botón que abre el desplegable de razones.
-        Config.Motivo seleccionado = motivoSeleccionado();
-        String etiqueta = seleccionado == null
-                ? "Elige una razón ▾"
-                : seleccionado.nombre() + "  (" + seleccionado.tiempo(nivelActual) + ") ▾";
-        BotonNaranja boton = BotonNaranja.nuevo(Text.of(etiqueta), b -> {
-                    servidoresAbierto = false;
-                    motivosAbierto = !motivosAbierto;
-                    if (motivosAbierto) centrarScrollEnSeleccion();
-                })
-                .dimensions(panelX, filasY0, panelAncho, ALTO)
-                .build();
-        boton.setSeleccionado(seleccionado != null);
-        this.addDrawableChild(boton);
-        filasBotones.add(boton);
-    }
-
-    private void seleccionarMotivo(Config.Motivo motivo) {
-        if (pestanaActual == Pestana.MUTES) {
-            motivoMuteSel = motivo;
-        } else if (pestanaActual == Pestana.BANEOS) {
-            motivoBanSel = motivo;
-        }
-        motivosAbierto = false;
-        construirFilas();
-    }
-
-    private void cambiarNivel() {
-        nivelActual = (nivelActual % 3) + 1;
-        nivelBtn.setMessage(Text.of("Nivel: #" + nivelActual));
-        construirFilas();
-    }
-
-    // Texto del comando que se enviará con la selección actual (vista previa).
-    private String textoVistaPrevia() {
-        Config.Motivo motivo = motivoSeleccionado();
-        if (motivo == null) {
-            return "Elige una razón para ver el comando";
-        }
-        String usuario = this.campoUsuario.getText().trim();
-        if (usuario.isEmpty()) {
-            usuario = "<usuario>";
-        }
-        return pestanaActual == Pestana.MUTES
-                ? Config.comandoMute(usuario, motivo, nivelActual)
-                : Config.comandoBan(usuario, motivo, nivelActual);
-    }
-
-    // Botón Banear / Mutear: ejecuta el comando de la vista previa.
-    private void ejecutarSeleccion() {
-        Config.Motivo motivo = motivoSeleccionado();
-        if (motivo == null) {
-            avisar("Elige primero una razón.");
-            return;
-        }
-        if (usuarioActual() == null) return;
-        ejecutarAccion(motivo, nivelActual);
-        this.mensaje = Text.empty();
-    }
-
-    private void ejecutarAccion(Config.Motivo motivo, int nivel) {
-        String usuario = usuarioActual();
-        if (usuario == null) return;
-
-        String tiempo = motivo.tiempo(nivel);
-        String texto = Config.textoCopiable(usuario, motivo, nivel, tiempo);
-
-        if (pestanaActual == Pestana.MUTES) {
-            ultimoTextoMute = texto;
-            guardarEstado();
-            enviar(Config.comandoMute(usuario, motivo, nivel));
+        if (nivel == Config.Nivel.HELPER) {
+            initHelper(x);
         } else {
-            ultimoTextoBan = texto;
-            guardarEstado();
-            enviar(Config.comandoBan(usuario, motivo, nivel));
+            initAdmin(x);
         }
     }
 
-    private void ejecutarHistorial() {
-        String usuario = usuarioActual();
-        if (usuario == null) return;
-        enviar("hist " + usuario);
-    }
+    // ---------- Autocompletado (debajo del campo) ----------
+    private void refrescarSugerencias() {
+        for (ButtonWidget b : sugerencias) remove(b);
+        sugerencias.clear();
+        if (client == null || client.getNetworkHandler() == null || nick.isEmpty()) return;
 
-    private void ejecutarSS() {
-        String usuario = usuarioActual();
-        if (usuario == null) return;
-        enviar("ss " + usuario);
-    }
-
-    private void ejecutarLogs() {
-        String usuario = usuarioActual();
-        if (usuario == null) return;
-        enviar("logs " + usuario);
-    }
-
-    private void ejecutarMensajeSS(String texto) {
-        enviarMensaje(texto);
-    }
-
-    private void copiarUltimoBan() {
-        copiarTexto(ultimoTextoBan, "ban");
-    }
-
-    private void copiarUltimoMute() {
-        copiarTexto(ultimoTextoMute, "mute");
-    }
-
-    private void copiarTexto(String texto, String tipo) {
-        if (texto.isEmpty()) {
-            avisar("Todavía no hay ningún " + tipo + " para copiar.");
-            return;
+        int x = width / 2 - ANCHO / 2;
+        String q = nick.toLowerCase();
+        int i = 0;
+        for (PlayerListEntry e : client.getNetworkHandler().getPlayerList()) {
+            String n = e.getProfile().name();
+            if (n.toLowerCase().startsWith(q) && !n.equalsIgnoreCase(nick)) {
+                ButtonWidget b = ButtonWidget.builder(Text.literal(n), btn -> campoNick.setText(n))
+                        .dimensions(x, 72 + i * 16, ANCHO, 16).build();
+                sugerencias.add(b);
+                addDrawableChild(b);
+                if (++i >= 4) break;
+            }
         }
-        MinecraftClient.getInstance().keyboard.setClipboard(texto);
-        avisar("Copiado al portapapeles.");
     }
 
-    private String usuarioActual() {
-        String usuario = this.campoUsuario.getText().trim();
-        if (usuario.isEmpty()) {
-            avisar("Escribe primero el usuario.");
-            return null;
+    // ---------- Panel reducido (helper) ----------
+    private void initHelper(int x) {
+        addDrawableChild(boton("ipmute", x, 140, ANCHO, 20,
+                b -> enviar("ipmute " + nick.trim())));
+        addDrawableChild(boton("/hist", x, 165, ANCHO, 20,
+                b -> enviar("hist " + nick.trim())));
+        addDrawableChild(boton("Copiar Último Mute", x, 190, ANCHO, 20, b -> {
+            if (UltimoMute.texto != null) client.keyboard.setClipboard(UltimoMute.texto);
+        }));
+    }
+
+    // ---------- Panel completo (admin) ----------
+    private void initAdmin(int x) {
+        int y = 140;
+        addDrawableChild(boton("Modo: " + (modoBan ? "BAN" : "MUTE"), x, y, 135, 20, b -> {
+            modoBan = !modoBan;
+            motivoIdx = 0;
+            abierto = 0;
+            clearAndInit();
+        }));
+        addDrawableChild(boton("Nivel #" + (lvl + 1), x + 145, y, 135, 20, b -> {
+            abierto = abierto == 1 ? 0 : 1;
+            clearAndInit();
+        }));
+        addDrawableChild(boton(lista()[motivoIdx][0], x, y + 25, ANCHO, 20, b -> {
+            abierto = abierto == 2 ? 0 : 2;
+            clearAndInit();
+        }));
+
+        int off = 0;
+        int oy = y + 50;
+        if (abierto == 1) {
+            for (int i = 0; i < 3; i++) {
+                final int idx = i;
+                addDrawableChild(boton("Nivel #" + (i + 1), x, oy + i * 18, ANCHO, 18, b -> {
+                    lvl = idx;
+                    abierto = 0;
+                    clearAndInit();
+                }));
+            }
+            off = 3 * 18;
+        } else if (abierto == 2) {
+            String[][] l = lista();
+            for (int i = 0; i < l.length; i++) {
+                final int idx = i;
+                addDrawableChild(boton(l[i][0], x, oy + i * 18, ANCHO, 18, b -> {
+                    motivoIdx = idx;
+                    abierto = 0;
+                    clearAndInit();
+                }));
+            }
+            off = l.length * 18;
         }
-        this.ultimoUsuario = usuario;
-        guardarEstado();
-        return usuario;
+
+        int y2 = oy + off + 4;
+        previewY = y2;
+
+        addDrawableChild(boton(modoBan ? "Banear" : "Mutear", x, y2 + 16, 135, 20, b -> ejecutarAccion()));
+        addDrawableChild(boton("Historial", x + 145, y2 + 16, 135, 20,
+                b -> enviar("hist " + nick.trim())));
+
+        if (!modoBan) {
+            addDrawableChild(boton("Copiar", x, y2 + 40, 135, 20, b -> {
+                String n = nick.trim();
+                if (n.isEmpty()) return;
+                UltimoMute.texto = textoCopia(n);
+                client.keyboard.setClipboard(UltimoMute.texto);
+            }));
+        }
+        addDrawableChild(boton("Server", x + 145, y2 + 40, 135, 20, b -> {
+            abierto = abierto == 3 ? 0 : 3;
+            clearAndInit();
+        }));
+
+        if (abierto == 3) {
+            for (int i = 0; i < SERVIDORES.length; i++) {
+                final String s = SERVIDORES[i];
+                addDrawableChild(boton(s, x + 145, y2 + 62 + i * 18, 135, 18, b -> {
+                    enviar("server " + s);
+                    abierto = 0;
+                    clearAndInit();
+                }));
+            }
+        }
+    }
+
+    // ---------- Lógica ----------
+    private String[][] lista() {
+        return modoBan ? MOTIVOS_BAN : MOTIVOS_MUTE;
+    }
+
+    private String razon() {
+        return lista()[motivoIdx][0] + " #" + (lvl + 1);
+    }
+
+    private String tiempo() {
+        return lista()[motivoIdx][1 + lvl];
+    }
+
+    private String textoCopia(String n) {
+        return "Nick: " + n + "\nRazón: " + razon() + "\nTiempo: " + tiempo();
+    }
+
+    private void ejecutarAccion() {
+        String n = nick.trim();
+        if (n.isEmpty()) return;
+        if (!modoBan) UltimoMute.texto = textoCopia(n);
+        enviar((modoBan ? "ban " : "mute ") + n + " " + razon() + " " + tiempo());
     }
 
     private void enviar(String comando) {
-        // El comando se envía sin la barra inicial (el juego ya sabe que es un comando).
-        if (comando.startsWith("/")) {
-            comando = comando.substring(1);
-        }
-        registrarHistorial("Comando", "/" + comando);
-        if (!Config.ENVIAR_DIRECTO) {
-            MinecraftClient.getInstance().setScreen(new net.minecraft.client.gui.screen.ChatScreen("/" + comando));
-            return;
-        }
-        MinecraftClient client = MinecraftClient.getInstance();
-        if (client.player != null && client.player.networkHandler != null) {
+        if (client != null && client.player != null) {
             client.player.networkHandler.sendChatCommand(comando);
         }
     }
 
-    private void enviarMensaje(String texto) {
-        registrarHistorial("Mensaje SS", texto);
-        if (!Config.ENVIAR_DIRECTO) {
-            MinecraftClient.getInstance().setScreen(new net.minecraft.client.gui.screen.ChatScreen(texto));
-            return;
-        }
-        MinecraftClient client = MinecraftClient.getInstance();
-        if (client.player != null && client.player.networkHandler != null) {
-            client.player.networkHandler.sendChatMessage(texto);
-        }
+    private ButtonWidget boton(String texto, int x, int y, int w, int h, ButtonWidget.PressAction accion) {
+        return ButtonWidget.builder(Text.literal(texto), accion).dimensions(x, y, w, h).build();
     }
 
-    private void avisar(String texto) {
-        this.mensaje = Text.of(texto);
-    }
-
-    // ---------------------------------------------------------------
-    // Autocompletado de nombres: usa los jugadores conectados (lista de
-    // jugadores del servidor). Se completa con clic o con la tecla Tab.
-    // La lista sale justo DEBAJO del campo de usuario.
-    // ---------------------------------------------------------------
-
-    private List<String> coincidenciasNombres() {
-        List<String> resultado = new ArrayList<>();
-        if (this.campoUsuario == null) return resultado;
-        String texto = this.campoUsuario.getText();
-        if (texto.isEmpty()) return resultado;
-
-        MinecraftClient client = MinecraftClient.getInstance();
-        if (client.getNetworkHandler() == null) return resultado;
-
-        String minuscula = texto.toLowerCase(Locale.ROOT);
-        for (var entrada : client.getNetworkHandler().getPlayerList()) {
-            String nombre = entrada.getProfile().getName();
-            if (nombre.toLowerCase(Locale.ROOT).startsWith(minuscula) && !nombre.equalsIgnoreCase(texto)) {
-                resultado.add(nombre);
-            }
-        }
-        resultado.sort(String.CASE_INSENSITIVE_ORDER);
-        return resultado;
-    }
-
-    // Texto gris que se ve dentro del campo: el resto del primer nombre que coincide.
-    private String sugerenciaInline(String texto) {
-        if (texto.isEmpty()) return "Nombre del usuario";
-        List<String> coincidencias = coincidenciasNombres();
-        if (!coincidencias.isEmpty()) {
-            return coincidencias.get(0).substring(texto.length());
-        }
-        return "";
-    }
-
-    private void renderizarSugerencias(DrawContext context, int mouseX, int mouseY) {
-        if (campoUsuario == null || !campoUsuario.visible || !campoUsuario.isFocused()) return;
-        List<String> sugerencias = coincidenciasNombres();
-        int n = Math.min(sugerencias.size(), MAX_SUGERENCIAS);
-        if (n == 0) return;
-
-        int x0 = panelX;
-        int x1 = panelX + sugerenciasAncho;
-        int y0 = sugerenciasY;
-        int y1 = sugerenciasY + n * ALTO_SUGERENCIA;
-
-        context.fill(x0 - 1, y0 - 1, x1 + 1, y1 + 1, COLOR_ACENTO);
-        context.fill(x0, y0, x1, y1, 0xF0120818);
-        for (int i = 0; i < n; i++) {
-            int y = y0 + i * ALTO_SUGERENCIA;
-            boolean encima = mouseX >= x0 && mouseX < x1 && mouseY >= y && mouseY < y + ALTO_SUGERENCIA;
-            if (encima) {
-                context.fill(x0, y, x1, y + ALTO_SUGERENCIA, 0x55FF8C00);
-            }
-            context.drawTextWithShadow(this.textRenderer, Text.of(sugerencias.get(i)), x0 + 4, y + 2,
-                    i == 0 ? COLOR_ANTICHEAT_SUBTITULO : COLOR_TEXTO);
-        }
-    }
-
-    // ---------------------------------------------------------------
-    // Desplegable del botón "Server": primera opción "Ver lista" (/server)
-    // y después un /server <nombre> por cada servidor de SERVIDORES.
-    // Se abre hacia arriba (el botón está al final del panel); si no cupiera
-    // arriba, se abre hacia abajo.
-    // ---------------------------------------------------------------
-
-    private List<String> opcionesServidor() {
-        List<String> opciones = new ArrayList<>();
-        opciones.add("Ver lista");
-        for (String servidor : SERVIDORES) {
-            opciones.add(servidor);
-        }
-        return opciones;
-    }
-
-    private int servidoresAncho() {
-        return Math.max(serverBtn.getWidth(), 110);
-    }
-
-    private int servidoresY0(int cantidad) {
-        int alto = cantidad * ALTO_ITEM_DESPLEGABLE;
-        int arriba = utilidadesY - 2 - alto;
-        return arriba >= 4 ? arriba : utilidadesY + ALTO + 2;
-    }
-
-    private void renderizarDesplegableServidores(DrawContext context, int mouseX, int mouseY) {
-        if (!servidoresAbierto) return;
-        List<String> opciones = opcionesServidor();
-        int x1 = panelX + panelAncho;
-        int x0 = x1 - servidoresAncho();
-        int y0 = servidoresY0(opciones.size());
-        int y1 = y0 + opciones.size() * ALTO_ITEM_DESPLEGABLE;
-
-        context.fill(x0 - 1, y0 - 1, x1 + 1, y1 + 1, COLOR_ACENTO);
-        context.fill(x0, y0, x1, y1, 0xF0120818);
-        for (int i = 0; i < opciones.size(); i++) {
-            int y = y0 + i * ALTO_ITEM_DESPLEGABLE;
-            boolean encima = mouseX >= x0 && mouseX < x1 && mouseY >= y && mouseY < y + ALTO_ITEM_DESPLEGABLE;
-            if (encima) {
-                context.fill(x0, y, x1, y + ALTO_ITEM_DESPLEGABLE, 0x55FF8C00);
-            }
-            context.drawTextWithShadow(this.textRenderer, Text.of(opciones.get(i)), x0 + 4, y + 3,
-                    i == 0 ? COLOR_ANTICHEAT_SUBTITULO : COLOR_TEXTO);
-        }
-    }
-
-    // ---------------------------------------------------------------
-    // Desplegable de motivos (Mutes / Baneos): un botón que abre una
-    // lista con scroll de rueda justo debajo.
-    // ---------------------------------------------------------------
-
-    private boolean pestanaSancion() {
-        return pestanaActual == Pestana.MUTES || pestanaActual == Pestana.BANEOS;
-    }
-
-    private int motivosY0() {
-        return filasY0 + ALTO + 1;
-    }
-
-    private int motivosVisibles(int total) {
-        int disponible = (panelBottomY - 4 - motivosY0()) / ALTO_ITEM_MOTIVO;
-        return Math.max(1, Math.min(total, Math.min(MAX_MOTIVOS_VISIBLES, disponible)));
-    }
-
-    private void centrarScrollEnSeleccion() {
-        Config.Motivo[] motivos = motivosActuales();
-        Config.Motivo sel = motivoSeleccionado();
-        int visibles = motivosVisibles(motivos.length);
-        int idx = 0;
-        for (int i = 0; i < motivos.length; i++) {
-            if (motivos[i] == sel) { idx = i; break; }
-        }
-        motivosScroll = Math.max(0, Math.min(motivos.length - visibles, idx - visibles / 2));
-    }
-
-    private void renderizarDesplegableMotivos(DrawContext context, int mouseX, int mouseY) {
-        if (!motivosAbierto || !pestanaSancion()) return;
-        Config.Motivo[] motivos = motivosActuales();
-        Config.Motivo sel = motivoSeleccionado();
-        int visibles = motivosVisibles(motivos.length);
-        motivosScroll = Math.max(0, Math.min(motivos.length - visibles, motivosScroll));
-
-        int x0 = panelX;
-        int x1 = panelX + panelAncho;
-        int y0 = motivosY0();
-        int y1 = y0 + visibles * ALTO_ITEM_MOTIVO;
-
-        context.fill(x0 - 1, y0 - 1, x1 + 1, y1 + 1, COLOR_ACENTO);
-        context.fill(x0, y0, x1, y1, 0xF0120818);
-
-        for (int i = 0; i < visibles; i++) {
-            int idx = motivosScroll + i;
-            Config.Motivo motivo = motivos[idx];
-            int y = y0 + i * ALTO_ITEM_MOTIVO;
-            boolean encima = mouseX >= x0 && mouseX < x1 && mouseY >= y && mouseY < y + ALTO_ITEM_MOTIVO;
-            if (encima) {
-                context.fill(x0, y, x1, y + ALTO_ITEM_MOTIVO, 0x55FF8C00);
-            }
-            String texto = motivo.nombre() + "  (" + motivo.tiempo(nivelActual) + ")";
-            texto = this.textRenderer.trimToWidth(texto, panelAncho - 14);
-            context.drawTextWithShadow(this.textRenderer, Text.of(texto), x0 + 4, y + 4,
-                    motivo == sel ? COLOR_ANTICHEAT_SUBTITULO : COLOR_TEXTO);
-        }
-
-        // Barra de scroll si hay más motivos que los visibles
-        if (motivos.length > visibles) {
-            int altoTotal = y1 - y0;
-            int altoBarra = Math.max(10, altoTotal * visibles / motivos.length);
-            int recorrido = altoTotal - altoBarra;
-            int yBarra = y0 + (recorrido * motivosScroll) / (motivos.length - visibles);
-            context.fill(x1 - 4, yBarra, x1 - 1, yBarra + altoBarra, 0xFFFF8C00);
-        }
-    }
-
-    @Override
-    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
-        // Esc cierra primero el desplegable de motivos (sin cerrar el panel).
-        if (keyCode == GLFW.GLFW_KEY_ESCAPE && motivosAbierto) {
-            motivosAbierto = false;
-            return true;
-        }
-        // Esc cierra primero el desplegable de servidores (sin cerrar el panel).
-        if (keyCode == GLFW.GLFW_KEY_ESCAPE && servidoresAbierto) {
-            servidoresAbierto = false;
-            return true;
-        }
-        // Tab completa el nombre con la primera coincidencia.
-        if (keyCode == GLFW.GLFW_KEY_TAB && campoUsuario != null && campoUsuario.visible && campoUsuario.isFocused()) {
-            List<String> coincidencias = coincidenciasNombres();
-            if (!coincidencias.isEmpty()) {
-                campoUsuario.setText(coincidencias.get(0));
-                return true;
-            }
-        }
-        return super.keyPressed(keyCode, scanCode, modifiers);
-    }
-
-    @Override
-    public boolean mouseClicked(double mouseX, double mouseY, int button) {
-        // Desplegable de motivos: tiene prioridad sobre todo lo que hay debajo.
-        if (motivosAbierto && pestanaSancion()) {
-            Config.Motivo[] motivos = motivosActuales();
-            int visibles = motivosVisibles(motivos.length);
-            int x0 = panelX;
-            int x1 = panelX + panelAncho;
-            int y0 = motivosY0();
-            int y1 = y0 + visibles * ALTO_ITEM_MOTIVO;
-            if (button == 0 && mouseX >= x0 && mouseX < x1 && mouseY >= y0 && mouseY < y1) {
-                int indice = motivosScroll + (int) ((mouseY - y0) / ALTO_ITEM_MOTIVO);
-                if (indice >= 0 && indice < motivos.length) {
-                    seleccionarMotivo(motivos[indice]);
-                    return true;
-                }
-            }
-            // Clic fuera de la lista: se cierra (el botón de motivos se alterna solo).
-            boolean sobreBoton = mouseX >= panelX && mouseX < panelX + panelAncho
-                    && mouseY >= filasY0 && mouseY < filasY0 + ALTO;
-            if (!sobreBoton) {
-                motivosAbierto = false;
-                return true; // evita pulsar sin querer un botón que quedaba debajo de la lista
-            }
-        }
-
-        // Desplegable de servidores: tiene prioridad sobre todo lo que hay debajo.
-        if (servidoresAbierto) {
-            List<String> opciones = opcionesServidor();
-            int x1 = panelX + panelAncho;
-            int x0 = x1 - servidoresAncho();
-            int y0 = servidoresY0(opciones.size());
-            if (button == 0 && mouseX >= x0 && mouseX < x1 && mouseY >= y0) {
-                int indice = (int) ((mouseY - y0) / ALTO_ITEM_DESPLEGABLE);
-                if (indice >= 0 && indice < opciones.size()) {
-                    servidoresAbierto = false;
-                    if (indice == 0) {
-                        enviar("server");
-                    } else {
-                        enviar("server " + opciones.get(indice));
-                    }
-                    return true;
-                }
-            }
-            // Clic fuera de la lista: se cierra (el propio botón "Server" lo alterna él solo).
-            if (!serverBtn.isMouseOver(mouseX, mouseY)) {
-                servidoresAbierto = false;
-            }
-        }
-
-        // Clic sobre un nombre de la lista de autocompletado.
-        if (button == 0 && campoUsuario != null && campoUsuario.visible && campoUsuario.isFocused()) {
-            List<String> sugerencias = coincidenciasNombres();
-            int n = Math.min(sugerencias.size(), MAX_SUGERENCIAS);
-            for (int i = 0; i < n; i++) {
-                int y = sugerenciasY + i * ALTO_SUGERENCIA;
-                if (mouseX >= panelX && mouseX < panelX + sugerenciasAncho
-                        && mouseY >= y && mouseY < y + ALTO_SUGERENCIA) {
-                    campoUsuario.setText(sugerencias.get(i));
-                    return true;
-                }
-            }
-        }
-        return super.mouseClicked(mouseX, mouseY, button);
-    }
-
-    // ---------------------------------------------------------------
-    // Guardado en disco: recuerda el usuario y la pestaña entre sesiones,
-    // y deja un registro de cada acción realizada en el panel.
-    // ---------------------------------------------------------------
-
-    private void cargarEstado() {
-        Properties props = new Properties();
-        if (Files.exists(ARCHIVO_ESTADO)) {
-            try (InputStream in = Files.newInputStream(ARCHIVO_ESTADO)) {
-                props.load(in);
-            } catch (IOException ignored) {
-                // si el archivo está dañado, simplemente empieza de cero
-            }
-        }
-        this.ultimoUsuario = props.getProperty("ultimoUsuario", "");
-        this.ultimoTextoBan = props.getProperty("ultimoTextoBan", "");
-        this.ultimoTextoMute = props.getProperty("ultimoTextoMute", "");
-        try {
-            this.pestanaActual = Pestana.valueOf(props.getProperty("ultimaPestana", "MUTES"));
-        } catch (IllegalArgumentException ignored) {
-            this.pestanaActual = Pestana.MUTES;
-        }
-    }
-
-    private void guardarEstado() {
-        Properties props = new Properties();
-        props.setProperty("ultimoUsuario", this.ultimoUsuario);
-        props.setProperty("ultimoTextoBan", this.ultimoTextoBan);
-        props.setProperty("ultimoTextoMute", this.ultimoTextoMute);
-        props.setProperty("ultimaPestana", this.pestanaActual.name());
-        try {
-            Files.createDirectories(ARCHIVO_ESTADO.getParent());
-            try (OutputStream out = Files.newOutputStream(ARCHIVO_ESTADO)) {
-                props.store(out, "Estado del panel de moderación Minebosh");
-            }
-        } catch (IOException ignored) {
-            // si falla el guardado no debe romper el juego
-        }
-    }
-
-    private void registrarHistorial(String tipo, String contenido) {
-        String linea = "[" + LocalDateTime.now().format(FORMATO_FECHA) + "] " + tipo + ": " + contenido;
-        try {
-            Files.createDirectories(ARCHIVO_HISTORIAL.getParent());
-            Files.writeString(ARCHIVO_HISTORIAL, linea + System.lineSeparator(), StandardCharsets.UTF_8,
-                    StandardOpenOption.CREATE, StandardOpenOption.APPEND);
-        } catch (IOException ignored) {
-            // si falla el guardado no debe romper el juego
-        }
-        // El mini chat de la esquina ya se alimenta solo (ClientSendMessageEvents),
-        // capturando el mensaje/comando real que se envía al servidor.
-    }
-
-    // ---------------------------------------------------------------
-    // Panel de registro: reconstruye el caché de líneas ajustadas al
-    // ancho disponible solo cuando cambia el contenido o el tamaño.
-    // ---------------------------------------------------------------
-
-    private void actualizarCacheRegistro() {
-        List<RegistroModeracion.Entrada> entradas = RegistroModeracion.copia();
-        int anchoContenido = registroAncho - 4;
-        if (entradas.size() == registroCacheTamano && anchoContenido == registroCacheAncho) {
-            return;
-        }
-        registroCacheTamano = entradas.size();
-        registroCacheAncho = anchoContenido;
-        registroLineasCache.clear();
-        registroColoresCache.clear();
-
-        for (RegistroModeracion.Entrada entrada : entradas) {
-            int color = entrada.tipo() == RegistroModeracion.Tipo.RESPUESTA ? COLOR_REGISTRO_RESPUESTA : COLOR_REGISTRO_ACCION;
-            String textoCompleto = "[" + entrada.hora() + "] " + entrada.texto();
-            String comando = entrada.texto();
-
-            // /logs entero en rojo y negrita, /hist entero en verde y negrita.
-            boolean esLogs = comando.startsWith("/logs ") || comando.equals("/logs");
-            boolean esHist = comando.startsWith("/hist ") || comando.equals("/hist");
-            // Respuesta del servidor con una sanción de ban (p. ej. lo que muestra
-            // /logs o /hist debajo del comando: "Fulano fue baneado por Zutano razon: ...").
-            boolean esSancionBan = comando.toLowerCase(java.util.Locale.ROOT).contains("fue baneado por");
-
-            MutableText texto = Text.literal(textoCompleto);
-            if (esSancionBan) {
-                texto.setStyle(Style.EMPTY.withBold(true).withColor(Formatting.GREEN));
-                color = COLOR_SANCION_BAN;
-            } else if (esLogs) {
-                texto.setStyle(Style.EMPTY.withBold(true).withColor(Formatting.RED));
-                color = Formatting.RED.getColorValue();
-            } else if (esHist) {
-                texto.setStyle(Style.EMPTY.withBold(true).withColor(Formatting.GREEN));
-                color = Formatting.GREEN.getColorValue();
-            }
-
-            List<OrderedText> lineas = this.textRenderer.wrapLines(texto, anchoContenido);
-            for (OrderedText linea : lineas) {
-                registroLineasCache.add(linea);
-                registroColoresCache.add(color);
-            }
-        }
-
-        if (registroAutoScroll) {
-            registroScroll = calcularScrollMaximo();
-        } else {
-            registroScroll = Math.min(registroScroll, calcularScrollMaximo());
-        }
-    }
-
-    private int calcularScrollMaximo() {
-        int alturaTotal = registroLineasCache.size() * 10;
-        int alturaVisible = Math.max(0, registroContenidoY1 - registroContenidoY0);
-        return Math.max(0, alturaTotal - alturaVisible);
-    }
-
-    @Override
-    public boolean mouseScrolled(double mouseX, double mouseY, double amount) {
-        if (motivosAbierto && pestanaSancion()) {
-            int total = motivosActuales().length;
-            int visibles = motivosVisibles(total);
-            motivosScroll = Math.max(0, Math.min(total - visibles, motivosScroll - (int) Math.signum(amount)));
-            return true;
-        }
-        if (mostrarRegistro && mouseX >= registroX && mouseX <= registroX + registroAncho
-                && mouseY >= registroContenidoY0 && mouseY <= registroContenidoY1) {
-            int scrollMax = calcularScrollMaximo();
-            registroScroll = (int) Math.max(0, Math.min(scrollMax, registroScroll - amount * 12));
-            registroAutoScroll = (registroScroll >= scrollMax);
-            return true;
-        }
-        if (pestanaActual == Pestana.ANTICHEAT && mouseX >= panelX && mouseX <= panelX + panelAncho
-                && mouseY >= filasY0 - 4 && mouseY <= paginacionY - ESPACIO) {
-            int scrollMax = calcularScrollMaximoAntiCheat();
-            anticheatScroll = (int) Math.max(0, Math.min(scrollMax, anticheatScroll - amount * 12));
-            return true;
-        }
-        return super.mouseScrolled(mouseX, mouseY, amount);
-    }
-
-    private int calcularScrollMaximoAntiCheat() {
-        actualizarCacheAntiCheat();
-        int alturaTotal = 0;
-        for (boolean separador : anticheatSeparadorCache) {
-            alturaTotal += separador ? 6 : 10;
-        }
-        int alturaVisible = Math.max(0, (paginacionY - ESPACIO) - (filasY0 - 4));
-        return Math.max(0, alturaTotal - alturaVisible);
-    }
-
-    // ---------------------------------------------------------------
-    // Pestaña AntiCheat: contenido informativo estático, envuelto al
-    // ancho del panel y desplazable con la rueda del ratón.
-    // ---------------------------------------------------------------
-
-    private void actualizarCacheAntiCheat() {
-        if (anticheatCacheAncho == panelAncho) return;
-        anticheatCacheAncho = panelAncho;
-        anticheatLineasCache.clear();
-        anticheatColoresCache.clear();
-        anticheatSeparadorCache.clear();
-
-        for (LineaAntiCheat linea : CONTENIDO_ANTICHEAT) {
-            if (linea.tipo() == TipoLineaAntiCheat.SEPARADOR) {
-                anticheatLineasCache.add(null);
-                anticheatColoresCache.add(COLOR_SEPARADOR);
-                anticheatSeparadorCache.add(true);
-                continue;
-            }
-
-            int color = switch (linea.tipo()) {
-                case TITULO -> COLOR_TITULO;
-                case SUBTITULO -> COLOR_ANTICHEAT_SUBTITULO;
-                default -> COLOR_TEXTO;
-            };
-
-            String prefijo = linea.tipo() == TipoLineaAntiCheat.TEXTO ? "• " : "";
-            MutableText texto = Text.literal(prefijo + linea.texto());
-            if (linea.tipo() == TipoLineaAntiCheat.TITULO || linea.tipo() == TipoLineaAntiCheat.SUBTITULO) {
-                texto.setStyle(Style.EMPTY.withBold(true));
-            }
-
-            List<OrderedText> envueltas = this.textRenderer.wrapLines(texto, panelAncho);
-            for (OrderedText envuelta : envueltas) {
-                anticheatLineasCache.add(envuelta);
-                anticheatColoresCache.add(color);
-                anticheatSeparadorCache.add(false);
-            }
-        }
-    }
-
-    private void renderizarAntiCheat(DrawContext context) {
-        actualizarCacheAntiCheat();
-
-        int y0 = filasY0 - 4;
-        int y1 = paginacionY - ESPACIO;
-
-        if (anticheatLineasCache.isEmpty()) {
-            context.drawTextWithShadow(this.textRenderer, Text.of("Sin contenido."), panelX, y0, COLOR_SUAVE);
-            return;
-        }
-
-        int scrollMax = calcularScrollMaximoAntiCheat();
-        anticheatScroll = Math.max(0, Math.min(anticheatScroll, scrollMax));
-
-        context.enableScissor(panelX - 4, y0, panelX + panelAncho + 4, y1);
-
-        int y = y0 - anticheatScroll;
-        for (int i = 0; i < anticheatLineasCache.size(); i++) {
-            boolean separador = anticheatSeparadorCache.get(i);
-            int alto = separador ? 6 : 10;
-            if (y + alto >= y0 && y <= y1) {
-                if (separador) {
-                    lineaSolida(context, panelX, panelX + panelAncho, y + 2, 1, 0x80FF8C00);
-                } else {
-                    context.drawTextWithShadow(this.textRenderer, anticheatLineasCache.get(i), panelX, y, anticheatColoresCache.get(i));
-                }
-            }
-            y += alto;
-        }
-
-        context.disableScissor();
-
-        if (scrollMax > 0) {
-            context.drawTextWithShadow(this.textRenderer, Text.of("▼ desplázate con la rueda"), panelX, y1 - 9, COLOR_REGISTRO_HORA);
-        }
-    }
-
-    // ---------------------------------------------------------------
-    // Render
-    // ---------------------------------------------------------------
-
+    // ---------- Dibujo ----------
     @Override
     public void render(DrawContext context, int mouseX, int mouseY, float delta) {
-        if (!Config.licenciaValida()) {
-            // En un PC no autorizado la pantalla se cierra sola y no se dibuja nada.
-            MinecraftClient.getInstance().setScreen(null);
-            return;
-        }
+        int x = width / 2 - ANCHO / 2;
 
-        this.renderBackground(context);
-        dibujarAmbienteHalloween(context);
-
-        // Texto gris de autocompletado dentro del campo de usuario
-        if (campoUsuario.visible) {
-            campoUsuario.setSuggestion(sugerenciaInline(campoUsuario.getText()));
-        }
-
-        // Panel de fondo con borde, para separar visualmente del mundo detrás
-        context.fill(panelX - PADDING_PANEL, panelTopY, panelX + panelAncho + PADDING_PANEL, panelBottomY, COLOR_FONDO_PANEL);
-
-        // Franjas alternas detrás de las filas, para leerlas mejor
-        int cantidadFondo = cantidadItemsActual();
-        int paginaFondo = paginaActual();
-        int inicioFondo = paginaFondo * filasPorPagina;
-        int finFondo = Math.min(inicioFondo + filasPorPagina, cantidadFondo);
-        for (int i = inicioFondo; i < finFondo; i++) {
-            int fila = i - inicioFondo;
-            if (fila % 2 == 0) {
-                int y = filasY0 + fila * (ALTO + ESPACIO) - 1;
-                context.fill(panelX - 4, y, panelX + panelAncho + 4, y + ALTO + 2, COLOR_FILA_PAR);
-            }
-        }
-
-        // Separador antes de la fila de utilidades
-        lineaSolida(context, panelX, panelX + panelAncho, utilidadesLabelY - 2, 1, 0x80FF8C00);
-
-        // Mini chat de registro: cajita en la esquina, por encima de todo lo demás
-        if (mostrarRegistro) {
-            context.fill(registroX - 8, registroCajaTopY, registroX + registroAncho + 8, registroCajaBottomY, COLOR_FONDO_PANEL);
-            context.fill(registroX - 8, registroCajaTopY, registroX + registroAncho + 8, registroCajaTopY + REGISTRO_TITULO_ALTO - 2, 0x22FFFFFF);
-        }
-
-        // Telarañas en las esquinas (detrás de los botones)
-        dibujarTelarana(context, panelX - PADDING_PANEL + 1, panelTopY + 1, 1, 1, 24);
-        int esquinaDerecha = mostrarRegistro ? registroX + registroAncho + 8 : panelX + panelAncho + PADDING_PANEL;
-        dibujarTelarana(context, esquinaDerecha - 1, panelTopY + 1, -1, 1, 24);
+        context.fill(0, 0, width, height, FONDO);
+        context.fill(x - 10, 18, x + ANCHO + 10, 20, ACENTO);
+        context.fill(x - 10, height - 20, x + ANCHO + 10, height - 18, MORADO);
 
         super.render(context, mouseX, mouseY, delta);
 
-        // Marcos arcoíris (se dibujan tras los widgets para que se vean completos)
-        marcoArcoiris(context, panelX - PADDING_PANEL, panelTopY, panelX + panelAncho + PADDING_PANEL, panelBottomY);
-        if (mostrarRegistro) {
-            marcoArcoiris(context, registroX - 8, registroCajaTopY, registroX + registroAncho + 8, registroCajaBottomY);
-            lineaSolida(context, registroX - 8, registroX + registroAncho + 8, registroCajaTopY + REGISTRO_TITULO_ALTO - 2, 1, 0x80FF8C00);
+        context.drawCenteredTextWithShadow(textRenderer, Text.literal("MODERACION MINEBOSH"), width / 2, 30, ACENTO);
+        if (nivel == Config.Nivel.HELPER) {
+            context.drawCenteredTextWithShadow(textRenderer, Text.literal("Modo helper"), width / 2, 40, MORADO);
         }
 
-        // Título con calabazas a los lados
-        Text tituloHalloween = Text.of("☠ " + this.title.getString() + " ☠");
-        int centroTitulo = panelX + panelAncho / 2;
-        int anchoTitulo = this.textRenderer.getWidth(tituloHalloween);
-        context.drawCenteredTextWithShadow(this.textRenderer, tituloHalloween, centroTitulo, tituloY - 10, COLOR_TITULO);
-        dibujarHalo(context, centroTitulo - anchoTitulo / 2 - 18 + 6, 9, 14);
-        dibujarHalo(context, centroTitulo + anchoTitulo / 2 + 6 + 6, 9, 14);
-        dibujarCalabaza(context, centroTitulo - anchoTitulo / 2 - 18, 4, 1, 0);
-        dibujarCalabaza(context, centroTitulo + anchoTitulo / 2 + 6, 4, 1, 1);
-
-        // Araña colgando del borde superior del menú
-        dibujarArana(context, panelX + panelAncho - 6);
-        if (mostrarRegistro) {
-            dibujarArana(context, registroX + 100);
+        if (nivel == Config.Nivel.ADMIN && previewY >= 0) {
+            String n = nick.trim().isEmpty() ? "<nick>" : nick.trim();
+            String cmd = "/" + (modoBan ? "ban " : "mute ") + n + " " + razon() + " " + tiempo();
+            context.drawTextWithShadow(textRenderer, Text.literal(cmd), x, previewY, 0xFFFFFFFF);
         }
-
-        int cuartoTab = (panelAncho - ESPACIO * 3) / 4;
-        int ultimoTabAncho = panelAncho - cuartoTab * 3 - ESPACIO * 3;
-        int barraY = tabsY + ALTO + 1;
-        int barraX;
-        int barraAncho;
-        switch (pestanaActual) {
-            case MUTES -> { barraX = panelX; barraAncho = cuartoTab; }
-            case BANEOS -> { barraX = panelX + cuartoTab + ESPACIO; barraAncho = cuartoTab; }
-            case SS -> { barraX = panelX + (cuartoTab + ESPACIO) * 2; barraAncho = cuartoTab; }
-            default -> { barraX = panelX + (cuartoTab + ESPACIO) * 3; barraAncho = ultimoTabAncho; }
-        }
-        lineaSolida(context, barraX, barraX + barraAncho, barraY, 2, COLOR_LINEA);
-
-        if (pestanaActual == Pestana.SS) {
-            context.drawTextWithShadow(this.textRenderer, Text.of("Mensajes SS"), panelX, filasY0 - 11, COLOR_SUAVE);
-        } else if (pestanaActual == Pestana.ANTICHEAT) {
-            renderizarAntiCheat(context);
-        } else {
-            // Vista previa del comando que se enviará (Mutes / Baneos)
-            Config.Motivo motivoSel = motivoSeleccionado();
-            String vista = this.textRenderer.trimToWidth(textoVistaPrevia(), panelAncho);
-            context.drawCenteredTextWithShadow(this.textRenderer, Text.of(vista), panelX + panelAncho / 2, comandoY + 2,
-                    motivoSel == null ? COLOR_SUAVE : COLOR_ANTICHEAT_SUBTITULO);
-        }
-
-        if (totalPaginas() > 1) {
-            String texto = "Página " + (paginaActual() + 1) + "/" + totalPaginas();
-            context.drawCenteredTextWithShadow(this.textRenderer, Text.of(texto), panelX + panelAncho / 2, paginacionY + 6, COLOR_SUAVE);
-        }
-
-        context.drawCenteredTextWithShadow(this.textRenderer, Text.of("☠ Utilidades ☠"), panelX + panelAncho / 2, utilidadesLabelY - 9, COLOR_SUAVE);
-
-        if (!this.mensaje.getString().isEmpty()) {
-            context.drawCenteredTextWithShadow(this.textRenderer, this.mensaje, panelX + panelAncho / 2, mensajeY, COLOR_AVISO);
-        }
-
-        if (mostrarRegistro) {
-            renderizarRegistro(context);
-        }
-
-        // Las listas desplegables van las últimas para quedar por encima de todo.
-        renderizarSugerencias(context, mouseX, mouseY);
-        renderizarDesplegableMotivos(context, mouseX, mouseY);
-        renderizarDesplegableServidores(context, mouseX, mouseY);
-    }
-
-    private void renderizarRegistro(DrawContext context) {
-        int tituloY = registroCajaTopY + 4;
-        context.drawTextWithShadow(this.textRenderer, Text.of("☠ Registro"), registroX, tituloY, COLOR_ACENTO);
-
-        actualizarCacheRegistro();
-
-        if (registroLineasCache.isEmpty()) {
-            context.drawTextWithShadow(this.textRenderer, Text.of("Sin actividad todavía."), registroX, registroContenidoY0 + 2, COLOR_SUAVE);
-            return;
-        }
-
-        context.enableScissor(registroX - 8, registroContenidoY0, registroX + registroAncho + 8, registroContenidoY1);
-
-        int alturaTotal = registroLineasCache.size() * 10;
-        int alturaVisible = registroContenidoY1 - registroContenidoY0;
-        int y = registroContenidoY0 - registroScroll + Math.max(0, alturaVisible - alturaTotal);
-
-        for (int i = 0; i < registroLineasCache.size(); i++) {
-            if (y >= registroContenidoY0 - 10 && y <= registroContenidoY1) {
-                context.drawTextWithShadow(this.textRenderer, registroLineasCache.get(i), registroX, y, registroColoresCache.get(i));
-            }
-            y += 10;
-        }
-
-        context.disableScissor();
-
-        if (!registroAutoScroll) {
-            context.drawTextWithShadow(this.textRenderer, Text.of("▼ hay mensajes nuevos, baja con la rueda"), registroX, registroContenidoY1 - 9, COLOR_REGISTRO_HORA);
-        }
-    }
-
-    @Override
-    public boolean shouldPause() {
-        return false;
     }
 }
