@@ -1,4 +1,4 @@
-package TU.PAQUETE;
+package com.minebosh.moderacion;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -8,9 +8,9 @@ public final class Config {
 
     public enum Nivel { NINGUNO, HELPER, ADMIN }
 
-    // Deja aquí el hash de admin que ya tenías en tu Config.java anterior
-    private static final String HASH_ADMIN = "PEGA_AQUI_TU_HASH_ADMIN";
-    // Hash SHA-256 de la clave helper
+    // Hash SHA-256 de la clave de admin (67mod)
+    private static final String HASH_ADMIN  = "4b8f90665f3050c4d659f1f1f4f20bae29b103538a0af945aa6c82fa3b8e927e";
+    // Hash SHA-256 de la clave helper (67helper)
     private static final String HASH_HELPER = "ff7936e807d742a93d3a26197ae07133716e5bd277a05dec484bd8db4b53696b";
 
     public static Nivel nivelPara(String clave) {
