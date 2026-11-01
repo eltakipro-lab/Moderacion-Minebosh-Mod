@@ -22,12 +22,14 @@ public class ModeracionScreen extends Screen {
             {"Nombrar servidores Externos", "30m", "1h", "2h"},
             {"Tradeos Externos", "2h", "6h", "15h"}
     };
-    // Solo conozco "Evadir SS #1 35d": cambia los demás motivos y tiempos por los tuyos
+    // Solo conozco "Evadir SS #1 35d": añade tus otros motivos de ipban con sus tiempos
     private static final String[][] MOTIVOS_BAN = {
             {"Evadir SS", "35d", "35d", "35d"}
     };
-    // Servidores del desplegable de /server: pon los tuyos
-    private static final String[] SERVIDORES = {"lobby", "survival", "skyblock"};
+    private static final String[] SERVIDORES = {
+            "BajoBox", "ClashBox", "Earth", "FullPvP", "GensOp", "MarioBox", "OneBlock",
+            "PokeBox", "Practice3", "SurvivalOp", "WorldBox", "lobby", "lobby2"
+    };
     // ======================
 
     private static final int ANCHO = 280;
@@ -45,7 +47,6 @@ public class ModeracionScreen extends Screen {
 
     private TextFieldWidget campoNick;
     private final List<ButtonWidget> sugerencias = new ArrayList<>();
-    private int previewY = -1;
 
     public ModeracionScreen(Config.Nivel nivel) {
         super(Text.literal("Moderacion"));
@@ -67,13 +68,16 @@ public class ModeracionScreen extends Screen {
         });
         addDrawableChild(campoNick);
         setInitialFocus(campoNick);
-        refrescarSugerencias();
 
-        if (nivel == Config.Nivel.HELPER) {
+        if (abierto != 0) {
+            initLista(x);
+        } else if (nivel == Config.Nivel.HELPER) {
             initHelper(x);
         } else {
             initAdmin(x);
         }
+
+        refrescarSugerencias();
     }
 
     // ---------- Autocompletado (debajo del campo) ----------
@@ -92,95 +96,87 @@ public class ModeracionScreen extends Screen {
                         .dimensions(x, 72 + i * 16, ANCHO, 16).build();
                 sugerencias.add(b);
                 addDrawableChild(b);
-                if (++i >= 4) break;
+                if (++i >= 3) break;
             }
         }
     }
 
     // ---------- Panel reducido (helper) ----------
     private void initHelper(int x) {
-        addDrawableChild(boton("ipmute", x, 140, ANCHO, 20,
+        addDrawableChild(boton("ipmute", x, 134, ANCHO, 20,
                 b -> enviar("ipmute " + nick.trim())));
-        addDrawableChild(boton("/hist", x, 165, ANCHO, 20,
+        addDrawableChild(boton("/hist", x, 156, ANCHO, 20,
                 b -> enviar("hist " + nick.trim())));
-        addDrawableChild(boton("Copiar Último Mute", x, 190, ANCHO, 20, b -> {
+        addDrawableChild(boton("Copiar Último Mute", x, 178, ANCHO, 20, b -> {
             if (UltimoMute.texto != null) client.keyboard.setClipboard(UltimoMute.texto);
         }));
+        addDrawableChild(boton("Server", x, 200, ANCHO, 20, b -> abrir(3)));
     }
 
     // ---------- Panel completo (admin) ----------
     private void initAdmin(int x) {
-        int y = 140;
-        addDrawableChild(boton("Modo: " + (modoBan ? "BAN" : "MUTE"), x, y, 135, 20, b -> {
+        addDrawableChild(boton("Modo: " + (modoBan ? "IPBAN" : "MUTE"), x, 134, 135, 20, b -> {
             modoBan = !modoBan;
             motivoIdx = 0;
-            abierto = 0;
             clearAndInit();
         }));
-        addDrawableChild(boton("Nivel #" + (lvl + 1), x + 145, y, 135, 20, b -> {
-            abierto = abierto == 1 ? 0 : 1;
-            clearAndInit();
-        }));
-        addDrawableChild(boton(lista()[motivoIdx][0], x, y + 25, ANCHO, 20, b -> {
-            abierto = abierto == 2 ? 0 : 2;
-            clearAndInit();
-        }));
+        addDrawableChild(boton("Nivel #" + (lvl + 1), x + 145, 134, 135, 20, b -> abrir(1)));
+        addDrawableChild(boton(lista()[motivoIdx][0], x, 156, ANCHO, 20, b -> abrir(2)));
 
-        int off = 0;
-        int oy = y + 50;
-        if (abierto == 1) {
-            for (int i = 0; i < 3; i++) {
-                final int idx = i;
-                addDrawableChild(boton("Nivel #" + (i + 1), x, oy + i * 18, ANCHO, 18, b -> {
-                    lvl = idx;
-                    abierto = 0;
-                    clearAndInit();
-                }));
-            }
-            off = 3 * 18;
-        } else if (abierto == 2) {
-            String[][] l = lista();
-            for (int i = 0; i < l.length; i++) {
-                final int idx = i;
-                addDrawableChild(boton(l[i][0], x, oy + i * 18, ANCHO, 18, b -> {
-                    motivoIdx = idx;
-                    abierto = 0;
-                    clearAndInit();
-                }));
-            }
-            off = l.length * 18;
-        }
-
-        int y2 = oy + off + 4;
-        previewY = y2;
-
-        addDrawableChild(boton(modoBan ? "Banear" : "Mutear", x, y2 + 16, 135, 20, b -> ejecutarAccion()));
-        addDrawableChild(boton("Historial", x + 145, y2 + 16, 135, 20,
+        addDrawableChild(boton(modoBan ? "Banear" : "Mutear", x, 192, 135, 20, b -> ejecutarAccion()));
+        addDrawableChild(boton("Historial", x + 145, 192, 135, 20,
                 b -> enviar("hist " + nick.trim())));
 
         if (!modoBan) {
-            addDrawableChild(boton("Copiar", x, y2 + 40, 135, 20, b -> {
+            addDrawableChild(boton("Copiar", x, 214, 135, 20, b -> {
                 String n = nick.trim();
                 if (n.isEmpty()) return;
                 UltimoMute.texto = textoCopia(n);
                 client.keyboard.setClipboard(UltimoMute.texto);
             }));
         }
-        addDrawableChild(boton("Server", x + 145, y2 + 40, 135, 20, b -> {
-            abierto = abierto == 3 ? 0 : 3;
-            clearAndInit();
-        }));
+        addDrawableChild(boton("Server", x + 145, 214, 135, 20, b -> abrir(3)));
+    }
 
-        if (abierto == 3) {
+    // ---------- Listas desplegables (ocupan el lugar de los botones) ----------
+    private void initLista(int x) {
+        int y = 134;
+        addDrawableChild(boton("Volver", x, 26, 50, 14, b -> abrir(0)));
+
+        if (abierto == 1) {
+            for (int i = 0; i < 3; i++) {
+                final int idx = i;
+                addDrawableChild(boton("Nivel #" + (i + 1), x, y + i * 19, ANCHO, 17, b -> {
+                    lvl = idx;
+                    abrir(0);
+                }));
+            }
+        } else if (abierto == 2) {
+            String[][] l = lista();
+            for (int i = 0; i < l.length; i++) {
+                final int idx = i;
+                addDrawableChild(boton(l[i][0], x, y + i * 18, ANCHO, 16, b -> {
+                    motivoIdx = idx;
+                    abrir(0);
+                }));
+            }
+        } else {
+            int w = (ANCHO - 10) / 3;
             for (int i = 0; i < SERVIDORES.length; i++) {
                 final String s = SERVIDORES[i];
-                addDrawableChild(boton(s, x + 145, y2 + 62 + i * 18, 135, 18, b -> {
+                int col = i % 3;
+                int row = i / 3;
+                addDrawableChild(boton(s, x + col * (w + 5), y + row * 19, w, 17, b -> {
                     enviar("server " + s);
-                    abierto = 0;
-                    clearAndInit();
+                    abrir(0);
                 }));
             }
         }
+    }
+
+    private void abrir(int valor) {
+        abierto = valor;
+        clearAndInit();
     }
 
     // ---------- Lógica ----------
@@ -204,7 +200,7 @@ public class ModeracionScreen extends Screen {
         String n = nick.trim();
         if (n.isEmpty()) return;
         if (!modoBan) UltimoMute.texto = textoCopia(n);
-        enviar((modoBan ? "ban " : "mute ") + n + " " + razon() + " " + tiempo());
+        enviar((modoBan ? "ipban " : "mute ") + n + " " + razon() + " " + tiempo());
     }
 
     private void enviar(String comando) {
@@ -233,10 +229,10 @@ public class ModeracionScreen extends Screen {
             context.drawCenteredTextWithShadow(textRenderer, Text.literal("Modo helper"), width / 2, 40, MORADO);
         }
 
-        if (nivel == Config.Nivel.ADMIN && previewY >= 0) {
+        if (nivel == Config.Nivel.ADMIN && abierto == 0) {
             String n = nick.trim().isEmpty() ? "<nick>" : nick.trim();
-            String cmd = "/" + (modoBan ? "ban " : "mute ") + n + " " + razon() + " " + tiempo();
-            context.drawTextWithShadow(textRenderer, Text.literal(cmd), x, previewY, 0xFFFFFFFF);
+            String cmd = "/" + (modoBan ? "ipban " : "mute ") + n + " " + razon() + " " + tiempo();
+            context.drawTextWithShadow(textRenderer, Text.literal(cmd), x, 180, 0xFFFFFFFF);
         }
     }
 }
