@@ -5,37 +5,28 @@ import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
 import net.minecraft.client.option.KeyBinding;
 import net.minecraft.client.util.InputUtil;
+import net.minecraft.util.Identifier;
 import org.lwjgl.glfw.GLFW;
 
-/**
- * Punto de entrada del mod en el cliente.
- * Registra el atajo de teclado que abre el panel de moderación.
- * La primera vez que se pulsa en cada sesión pide la clave (ClaveScreen);
- * una vez acertada, abre directamente el panel (ModeracionScreen).
- */
 public class ModeracionModClient implements ClientModInitializer {
 
-    private static KeyBinding abrirPanelKey;
+    private static KeyBinding abrirPanel;
 
     @Override
     public void onInitializeClient() {
-        // Tecla por defecto: "]" (corchete derecho). Se puede remapear
-        // libremente desde Opciones -> Controles dentro del juego.
-        abrirPanelKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
-                "key.moderacion-minebosh-tabs.abrir",
+        KeyBinding.Category categoria = KeyBinding.Category.create(Identifier.of("moderacion", "general"));
+
+        abrirPanel = KeyBindingHelper.registerKeyBinding(new KeyBinding(
+                "key.moderacion.abrir",
                 InputUtil.Type.KEYSYM,
-                GLFW.GLFW_KEY_RIGHT_BRACKET,
-                "category.moderacion-minebosh-tabs"
+                GLFW.GLFW_KEY_M,
+                categoria
         ));
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
-            while (abrirPanelKey.wasPressed()) {
-                if (client.player != null && client.currentScreen == null) {
-                    if (Config.desbloqueado) {
-                        client.setScreen(new ModeracionScreen());
-                    } else {
-                        client.setScreen(new ClaveScreen());
-                    }
+            while (abrirPanel.wasPressed()) {
+                if (client.currentScreen == null) {
+                    client.setScreen(new ClaveScreen());
                 }
             }
         });
