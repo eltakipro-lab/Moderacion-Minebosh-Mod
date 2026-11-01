@@ -90,7 +90,7 @@ public class ModeracionScreen extends Screen {
         String q = nick.toLowerCase();
         int i = 0;
         for (PlayerListEntry e : client.getNetworkHandler().getPlayerList()) {
-            String n = e.getProfile().name();
+            String n = e.getProfile().getName();
             if (n.toLowerCase().startsWith(q) && !n.equalsIgnoreCase(nick)) {
                 ButtonWidget b = ButtonWidget.builder(Text.literal(n), btn -> campoNick.setText(n))
                         .dimensions(x, 72 + i * 16, ANCHO, 16).build();
